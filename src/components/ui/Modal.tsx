@@ -1,5 +1,5 @@
 // src/components/ui/Modal.tsx
-import { ReactNode } from "react";
+import { ReactNode, useEffect } from "react";
 import { ExclamationTriangleIcon, TrashIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
 
 type ModalProps = {
@@ -8,10 +8,36 @@ type ModalProps = {
   description: ReactNode; // Mengizinkan teks biasa atau elemen HTML (seperti <span>)
   type?: "danger" | "severe" | "warning"; // Tema warna
   icon?: "trash" | "reset" | "warning"; // Pilihan ikon
+  onClose: () => void;      // Fungsi yang dipanggil saat tombol Escape ditekan
+  onConfirm?: () => void;   // Fungsi yang dipanggil saat tombol Enter ditekan
   children: ReactNode; // Tempat untuk menyisipkan tombol-tombol kustom dari luar
 };
 
-export default function Modal({ isOpen, title, description, type = "warning", icon = "warning", children }: ModalProps) {
+export default function Modal({ isOpen, title, description, type = "warning", icon = "warning", onClose, onConfirm, children }: ModalProps) {
+  
+  // --- Fitur Sensor Keyboard (Escape & Enter) ---
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isOpen) return; // Jangan lakukan apa-apa kalau popup sedang tertutup
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose(); // Jalankan fungsi batal
+      } else if (e.key === "Enter" && onConfirm) {
+        e.preventDefault();
+        onConfirm(); // Jalankan fungsi oke/lanjutkan
+      }
+    };
+
+    // Pasang telinga (listener) ke seluruh layar saat popup terbuka
+    if (isOpen) {
+      window.addEventListener("keydown", handleKeyDown);
+    }
+    
+    // Cabut telinga saat popup ditutup agar tidak bocor
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose, onConfirm]);
+  
   if (!isOpen) return null;
 
   // Konfigurasi Tema (Warna & Border)

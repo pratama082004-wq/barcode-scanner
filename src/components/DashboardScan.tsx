@@ -56,6 +56,12 @@ export default function DashboardScan() {
     setDeleteConfirm({ isOpen: false, itemId: null, barcodeId: "" });
   };
 
+  const confirmResetDataAction = () => {
+    setScannedItems([]);
+    localStorage.removeItem("winteq_scanner_data");
+    setResetConfirmOpen(false);
+  };
+
   const exportToExcelWithAlert = () => {
     if (scannedItems.length === 0) return setAlertModal({ isOpen: true, title: "Data Kosong", message: "Belum ada data pindaian barcode yang bisa diunduh." });
     const worksheet = XLSX.utils.json_to_sheet(scannedItems.map((item, i) => ({ "No": i + 1, "ID Barcode": item.barcode_id, "Waktu Scan": item.created_at })));
@@ -64,63 +70,75 @@ export default function DashboardScan() {
     XLSX.writeFile(workbook, "Laporan_Barcode_Winteq.xlsx");
   };
 
-  const confirmResetDataAction = () => {
-    setScannedItems([]);
-    localStorage.removeItem("winteq_scanner_data");
-    setResetConfirmOpen(false);
+  // --- Fungsi Khusus Modal Duplikat ---
+  const handleDuplicateCancel = () => setDuplicateModal({ isOpen: false, pendingBarcode: "" });
+  const handleDuplicateReplace = () => {
+    const newItem = { id: crypto.randomUUID(), barcode_id: duplicateModal.pendingBarcode, created_at: new Date().toLocaleString("id-ID") };
+    setScannedItems((prev) => [newItem, ...prev.filter(item => item.barcode_id !== duplicateModal.pendingBarcode)]);
+    handleDuplicateCancel();
+  };
+  const handleDuplicateContinue = () => {
+    addBarcode(duplicateModal.pendingBarcode);
+    handleDuplicateCancel();
   };
 
   if (!isMounted) return null;
 
   return (
     <>
+      {/* 1. Modal Hapus Satuan */}
       <Modal 
         isOpen={deleteConfirm.isOpen} 
         title="Hapus Barcode?" 
         type="danger" icon="trash"
+        onClose={() => setDeleteConfirm({ isOpen: false, itemId: null, barcodeId: "" })}
+        onConfirm={confirmDeleteRowAction} // Ditekan Enter otomatis menghapus
         description={<>Yakin menghapus barcode <span className="font-semibold text-red-700">"{deleteConfirm.barcodeId}"</span>?</>}
       >
-        <button onClick={() => setDeleteConfirm({ isOpen: false, itemId: null, barcodeId: "" })} className="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg">Batal</button>
-        <button onClick={confirmDeleteRowAction} className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg flex items-center"><TrashIcon className="w-4 h-4 mr-1.5" /> Hapus</button>
+        <button onClick={() => setDeleteConfirm({ isOpen: false, itemId: null, barcodeId: "" })} className="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg">Batal (Esc)</button>
+        <button onClick={confirmDeleteRowAction} className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg flex items-center"><TrashIcon className="w-4 h-4 mr-1.5" /> Hapus (Enter)</button>
       </Modal>
 
+      {/* 2. Modal Reset Semua */}
       <Modal 
         isOpen={resetConfirmOpen} 
         title="Peringatan: Reset Data Utuh" 
         type="severe" icon="reset"
+        onClose={() => setResetConfirmOpen(false)}
+        onConfirm={confirmResetDataAction} // Ditekan Enter otomatis mereset
         description={<>Yakin 100% menghapus <span className="font-semibold text-gray-800">SEMUA</span> {scannedItems.length} data?</>}
       >
-        <button onClick={() => setResetConfirmOpen(false)} className="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg">Batal</button>
-        <button onClick={confirmResetDataAction} className="px-5 py-2 bg-red-700 hover:bg-red-800 text-white text-sm font-medium rounded-lg flex items-center"><ArrowPathIcon className="w-4 h-4 mr-1.5" /> Reset SEMUA Data</button>
+        <button onClick={() => setResetConfirmOpen(false)} className="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg">Batal (Esc)</button>
+        <button onClick={confirmResetDataAction} className="px-5 py-2 bg-red-700 hover:bg-red-800 text-white text-sm font-medium rounded-lg flex items-center"><ArrowPathIcon className="w-4 h-4 mr-1.5" /> Reset SEMUA Data (Enter)</button>
       </Modal>
 
+      {/* 3. Modal Info Generic */}
       <Modal 
         isOpen={alertModal.isOpen} 
         title={alertModal.title} 
         type="warning" icon="warning"
+        onClose={() => setAlertModal({ isOpen: false, title: "", message: "" })}
+        onConfirm={() => setAlertModal({ isOpen: false, title: "", message: "" })} // Ditekan Enter otomatis menutup
         description={alertModal.message}
       >
-        <button onClick={() => setAlertModal({ isOpen: false, title: "", message: "" })} className="px-5 py-2 bg-yellow-500 hover:bg-yellow-600 text-white text-sm font-medium rounded-lg">Mengerti</button>
+        <button onClick={() => setAlertModal({ isOpen: false, title: "", message: "" })} className="px-5 py-2 bg-yellow-500 hover:bg-yellow-600 text-white text-sm font-medium rounded-lg">Mengerti (Enter/Esc)</button>
       </Modal>
 
+      {/* 4. Modal Duplikat */}
       <Modal 
         isOpen={duplicateModal.isOpen} 
         title="Barcode Sudah Ada!" 
         type="warning" icon="warning"
+        onClose={handleDuplicateCancel}
+        onConfirm={handleDuplicateContinue} // Ditekan Enter otomatis memilih "Tetap Tambahkan"
         description={<>ID Barcode <span className="font-semibold text-blue-600">"{duplicateModal.pendingBarcode}"</span> sudah ada. Apa yang ingin kamu lakukan?</>}
       >
-        <button onClick={() => setDuplicateModal({ isOpen: false, pendingBarcode: "" })} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg">Batal</button>
-        <button onClick={() => {
-            const newItem = { id: crypto.randomUUID(), barcode_id: duplicateModal.pendingBarcode, created_at: new Date().toLocaleString("id-ID") };
-            setScannedItems((prev) => [newItem, ...prev.filter(item => item.barcode_id !== duplicateModal.pendingBarcode)]);
-            setDuplicateModal({ isOpen: false, pendingBarcode: "" });
-        }} className="px-4 py-2 bg-blue-50 border border-blue-200 text-blue-700 text-sm font-medium rounded-lg">Timpa Waktu</button>
-        <button onClick={() => {
-            addBarcode(duplicateModal.pendingBarcode);
-            setDuplicateModal({ isOpen: false, pendingBarcode: "" });
-        }} className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-white text-sm font-medium rounded-lg flex items-center gap-1.5"><ExclamationTriangleIcon className="w-4 h-4"/> Tetap Tambahkan</button>
+        <button onClick={handleDuplicateCancel} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg">Batal (Esc)</button>
+        <button onClick={handleDuplicateReplace} className="px-4 py-2 bg-blue-50 border border-blue-200 text-blue-700 text-sm font-medium rounded-lg">Timpa Waktu</button>
+        <button onClick={handleDuplicateContinue} className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-white text-sm font-medium rounded-lg flex items-center gap-1.5"><ExclamationTriangleIcon className="w-4 h-4"/> Tambahkan (Enter)</button>
       </Modal>
 
+      {/* ===== KONTEN DASHBOARD BAWAAN ===== */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 relative z-0">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 border-l-4 border-l-blue-500">
           <h3 className="text-sm font-medium text-gray-500 mb-1.5">Total Scan Tersimpan</h3>
@@ -133,7 +151,6 @@ export default function DashboardScan() {
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 sticky top-0">
             <label className="block text-sm font-bold text-gray-700 mb-3 uppercase tracking-wider">Input Scanner</label>
             <p className="text-xs text-gray-500 mb-4">Arahkan alat ke barcode, data otomatis tersimpan.</p>
-            {/* Input diperkecil sedikit padding dan teksnya */}
             <input type="text" ref={inputRef} value={barcodeData} onChange={(e) => setBarcodeData(e.target.value)} onKeyDown={handleScan} disabled={anyModalOpen} className="w-full p-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-base disabled:bg-gray-100 disabled:cursor-not-allowed" placeholder={anyModalOpen ? "Menunggu aksi..." : "Scan barcode di sini..."} autoFocus onBlur={() => { if (!anyModalOpen) inputRef.current?.focus(); }} />
           </div>
         </div>
@@ -152,7 +169,6 @@ export default function DashboardScan() {
               <table className="w-full text-left border-collapse min-w-[400px]">
                 <thead>
                   <tr className="bg-white text-xs uppercase tracking-wider text-gray-500 border-b">
-                    {/* Padding dikembalikan ke ukuran standar */}
                     <th className="p-4 font-semibold w-16">No</th>
                     <th className="p-4 font-semibold">ID Barcode</th>
                     <th className="p-4 font-semibold">Waktu Scan</th>
