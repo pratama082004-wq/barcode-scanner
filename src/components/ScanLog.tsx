@@ -50,6 +50,10 @@ export default function ScanLog() {
   const [resizingCol, setResizingCol] = useState<{ id: string, startX: number, startWidth: number } | null>(null);
   const [draggedColId, setDraggedColId] = useState<string | null>(null);
 
+  // --- STATE BARU: Sistem Blok & Copy Paste Ala Excel ---
+  const [selection, setSelection] = useState<{startR: number, startC: number, endR: number, endC: number} | null>(null);
+  const [isDraggingGrid, setIsDraggingGrid] = useState<boolean>(false);
+
   const [pastStates, setPastStates] = useState<ScanItem[][]>([]);
   const [futureStates, setFutureStates] = useState<ScanItem[][]>([]);
 
@@ -112,6 +116,66 @@ export default function ScanLog() {
   const handleUndo = () => { if (pastStates.length === 0) return; const previousState = pastStates[pastStates.length - 1]; setPastStates((prev) => prev.slice(0, -1)); setFutureStates((prev) => [...prev, scannedItems]); setScannedItems(previousState); };
   const handleRedo = () => { if (futureStates.length === 0) return; const nextState = futureStates[futureStates.length - 1]; setFutureStates((prev) => prev.slice(0, -1)); setPastStates((prev) => [...prev, scannedItems]); setScannedItems(nextState); };
 
+  // --- LOGIKA COPY PASTE & BLOCKING ---
+  useEffect(() => {
+    const handleMouseUpGlobal = () => setIsDraggingGrid(false);
+    window.addEventListener('mouseup', handleMouseUpGlobal);
+    return () => window.removeEventListener('mouseup', handleMouseUpGlobal);
+  }, []);
+
+  const getGridDataString = () => {
+    if (!selection) return "";
+    const minR = Math.min(selection.startR, selection.endR); const maxR = Math.max(selection.startR, selection.endR);
+    const minC = Math.min(selection.startC, selection.endC); const maxC = Math.max(selection.startC, selection.endC);
+    let tsv = "";
+    for (let r = minR; r <= maxR; r++) {
+      let rowData = []; const item = displayedItems[r];
+      if (!item) continue;
+      for (let c = minC; c <= maxC; c++) {
+        const col = currentLayout[c]; let val = "";
+        if (col.id === 'no') val = (r + 1).toString();
+        else if (col.id === 'barcode_id') val = item.barcode_id;
+        else if (col.id === 'created_at') val = item.created_at;
+        else if (col.id === 'category') val = item.category || 'Default';
+        else val = item.custom_data?.[col.id] || "";
+        rowData.push(val.replace(/\t/g, " ").replace(/\n/g, " ")); 
+      }
+      tsv += rowData.join("\t") + "\n";
+    }
+    return tsv.trimEnd();
+  };
+
+  const handleGridPaste = (clipboardText: string) => {
+    if (!selection) return;
+    const minR = Math.min(selection.startR, selection.endR); const minC = Math.min(selection.startC, selection.endC);
+    const rows = clipboardText.split(/\r\n|\n|\r/);
+    
+    saveHistory();
+    setScannedItems(prevItems => {
+      const newItems = [...prevItems];
+      for (let i = 0; i < rows.length; i++) {
+        const targetR = minR + i; if (targetR >= displayedItems.length) break; 
+        const targetItem = displayedItems[targetR];
+        const globalIdx = newItems.findIndex(x => x.id === targetItem.id);
+        if (globalIdx === -1) continue;
+
+        const cols = rows[i].split("\t");
+        let updatedItem = { ...newItems[globalIdx], custom_data: { ...(newItems[globalIdx].custom_data || {}) } };
+        
+        for (let j = 0; j < cols.length; j++) {
+          const targetC = minC + j; if (targetC >= currentLayout.length) break;
+          const colDef = currentLayout[targetC]; const val = cols[j];
+          
+          if (colDef.type === 'custom') updatedItem.custom_data[colDef.id] = val;
+          else if (colDef.id === 'category') updatedItem.category = val;
+          else if (colDef.id === 'barcode_id') updatedItem.barcode_id = val;
+        }
+        newItems[globalIdx] = updatedItem;
+      }
+      return newItems;
+    });
+  };
+
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (anyModalOpen) return;
@@ -121,16 +185,38 @@ export default function ScanLog() {
     window.addEventListener('keydown', handleGlobalKeyDown); return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, [pastStates, futureStates, scannedItems, anyModalOpen]);
 
-  const handleCellKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>, rIdx: number, cIdx: number) => {
-    if (e.key === "Enter" && e.shiftKey) return;
+  useEffect(() => {
+    const handleCopy = (e: ClipboardEvent) => {
+      if (anyModalOpen || !selection) return;
+      const textSelected = window.getSelection()?.toString();
+      if (textSelected && textSelected.length > 0) return; // Biarkan copy text biasa bekerja
+      const tsv = getGridDataString();
+      if (tsv) { e.preventDefault(); e.clipboardData?.setData('text/plain', tsv); }
+    };
+    const handlePaste = (e: ClipboardEvent) => {
+      if (anyModalOpen || !selection) return;
+      const activeEl = document.activeElement;
+      const isInputActive = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
+      // Jika cuma 1 sel yg diblok dan kursor lagi kedip-kedip di dalamnya, paste ke dalam teksnya saja.
+      if (isInputActive && selection.startR === selection.endR && selection.startC === selection.endC) return; 
+      
+      e.preventDefault();
+      const clipboardData = e.clipboardData?.getData('Text');
+      if (clipboardData) handleGridPaste(clipboardData);
+    };
+    window.addEventListener('copy', handleCopy); window.addEventListener('paste', handlePaste);
+    return () => { window.removeEventListener('copy', handleCopy); window.removeEventListener('paste', handlePaste); };
+  }, [selection, displayedItems, currentLayout, scannedItems]);
 
+  const handleCellKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement | HTMLSelectElement>, rIdx: number, cIdx: number) => {
+    if (e.key === "Enter" && e.shiftKey) return;
     if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter"].includes(e.key)) {
       let nextR = rIdx; let nextC = cIdx; let shouldMove = false;
 
       if (e.key === "ArrowUp") { nextR--; shouldMove = true; } 
       else if (e.key === "ArrowDown" || e.key === "Enter") { nextR++; shouldMove = true; } 
-      else if (e.key === "ArrowLeft" && e.currentTarget.selectionStart === 0) { nextC--; shouldMove = true; } 
-      else if (e.key === "ArrowRight" && e.currentTarget.selectionEnd === e.currentTarget.value.length) { nextC++; shouldMove = true; }
+      else if (e.key === "ArrowLeft" && (e.currentTarget.tagName === 'SELECT' || (e.currentTarget as HTMLInputElement).selectionStart === 0)) { nextC--; shouldMove = true; } 
+      else if (e.key === "ArrowRight" && (e.currentTarget.tagName === 'SELECT' || (e.currentTarget as HTMLInputElement).selectionEnd === (e.currentTarget as HTMLInputElement).value.length)) { nextC++; shouldMove = true; }
 
       if (shouldMove) {
         let targetElement: HTMLElement | null = null;
@@ -144,8 +230,7 @@ export default function ScanLog() {
         } else {
           targetElement = document.getElementById(`cell-${nextR}-${nextC}`);
         }
-
-        if (targetElement) { e.preventDefault(); (targetElement as HTMLInputElement).focus(); }
+        if (targetElement) { e.preventDefault(); targetElement.focus(); }
       }
     }
   };
@@ -269,7 +354,6 @@ export default function ScanLog() {
   
   const exportToExcelWithAlert = () => {
     if (displayedItems.length === 0) return setAlertModal({ isOpen: true, title: "Data Kosong", message: "Belum ada data pindaian barcode di sheet ini." });
-    
     const worksheetData = displayedItems.map((item, i) => {
       const row: any = {};
       currentLayout.forEach(col => {
@@ -281,7 +365,6 @@ export default function ScanLog() {
       });
       return row;
     });
-
     const worksheet = XLSX.utils.json_to_sheet(worksheetData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, activeSheet.substring(0, 31)); 
@@ -375,7 +458,6 @@ export default function ScanLog() {
                   {currentLayout.map((col, idx) => (
                     <th 
                       key={col.id} 
-                      /* KUNCI GANDA: Lebar dipaksa mutlak dan tidak bisa ditawar! */
                       style={{ width: col.width, minWidth: col.width, maxWidth: col.width }} 
                       className={`relative font-semibold select-none transition-colors ${thBorderClass}`}
                       draggable={col.type === 'custom'}
@@ -432,39 +514,57 @@ export default function ScanLog() {
                   <th className={`p-3 font-semibold w-20 text-center uppercase sticky right-0 bg-gray-50 z-20 ${thBorderClass}`}>Aksi</th>
                 </tr>
               </thead>
-              <tbody className="text-sm">
+              <tbody className={`text-sm ${isDraggingGrid ? 'select-none' : ''}`}>
                 {displayedItems.length === 0 ? (
                   <tr><td colSpan={currentLayout.length + 1} className="p-16 text-center text-gray-400">Belum ada data di sheet ini.</td></tr>
                 ) : (
                   displayedItems.map((item, index) => (
                     <tr key={item.id} className="hover:bg-blue-50/40 transition-colors group">
                       {currentLayout.map((col, idx) => {
+                        
+                        // LOGIKA BLOK WARNA BIRU
+                        const isSelected = selection && 
+                          index >= Math.min(selection.startR, selection.endR) && 
+                          index <= Math.max(selection.startR, selection.endR) && 
+                          idx >= Math.min(selection.startC, selection.endC) && 
+                          idx <= Math.max(selection.startC, selection.endC);
+                          
+                        const activeBg = isSelected ? "bg-blue-100/60 ring-1 ring-blue-500/50" : "";
+
                         let cellContent;
-                        if (col.id === 'no') cellContent = index + 1;
-                        else if (col.id === 'barcode_id') cellContent = <span className="font-medium text-gray-900">{item.barcode_id}</span>;
-                        else if (col.id === 'created_at') cellContent = <span className="text-gray-600">{item.created_at}</span>;
-                        else if (col.id === 'category') {
+                        if (col.id === 'no') {
+                          cellContent = <span id={`cell-${index}-${idx}`} tabIndex={0} onKeyDown={(e) => handleCellKeyDown(e as any, index, idx)} className="block outline-none">{index + 1}</span>;
+                        } else if (col.id === 'barcode_id') {
+                          cellContent = (
+                            <input id={`cell-${index}-${idx}`} type="text" value={item.barcode_id} onChange={(e) => {
+                                saveHistory(); setScannedItems(prev => prev.map(i => i.id === item.id ? { ...i, barcode_id: e.target.value } : i));
+                              }} onKeyDown={(e) => handleCellKeyDown(e, index, idx)} onFocus={() => setSelection({ startR: index, startC: idx, endR: index, endC: idx })}
+                              className="w-full bg-transparent outline-none focus:ring-1 focus:ring-blue-400 rounded px-1 font-medium text-gray-900" 
+                            />
+                          );
+                        } else if (col.id === 'created_at') {
+                          cellContent = <span id={`cell-${index}-${idx}`} tabIndex={0} onKeyDown={(e) => handleCellKeyDown(e as any, index, idx)} className="block text-gray-600 outline-none">{item.created_at}</span>;
+                        } else if (col.id === 'category') {
                           cellContent = sheets.length === 1 
-                            ? <span className="px-3 py-1 bg-gray-100 text-gray-500 rounded text-xs">Default</span>
+                            ? <span id={`cell-${index}-${idx}`} tabIndex={0} className="px-3 py-1 bg-gray-100 text-gray-500 rounded text-xs outline-none">Default</span>
                             : (
-                              <select value={item.category || "Default"} onChange={(e) => handleCategoryChange(item.id, e.target.value)} className="text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-700 py-1 px-1 outline-none w-full cursor-pointer hover:bg-gray-50">
+                              <select id={`cell-${index}-${idx}`} value={item.category || "Default"} onChange={(e) => handleCategoryChange(item.id, e.target.value)} onKeyDown={(e) => handleCellKeyDown(e, index, idx)} onFocus={() => setSelection({ startR: index, startC: idx, endR: index, endC: idx })} className="text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-700 py-1 px-1 outline-none w-full cursor-pointer hover:bg-gray-50">
                                 <option value="Default">Default</option>
                                 {sheets.filter(s => s !== "All Data").map(sheet => <option key={sheet} value={sheet}>{sheet}</option>)}
                               </select>
                             );
                         } else {
-                          // UPDATE: Div "Break-All" untuk mematahkan teks raksasa
                           cellContent = (
                             <div className="grid w-full min-w-0">
                               <div className="invisible col-start-1 row-start-1 px-2 py-1.5 whitespace-pre-wrap break-all min-h-[36px] font-sans text-sm pointer-events-none w-full overflow-hidden">
-                                {item.custom_data?.[col.id] || ' '}
-                                {'\u200b'}
+                                {item.custom_data?.[col.id] || ' '}{'\u200b'}
                               </div>
                               <textarea 
                                 id={`cell-${index}-${idx}`}
                                 value={item.custom_data?.[col.id] || ''} 
                                 onChange={(e) => handleCustomDataChange(item.id, col.id, e.target.value)}
                                 onKeyDown={(e) => handleCellKeyDown(e, index, idx)}
+                                onFocus={() => setSelection({ startR: index, startC: idx, endR: index, endC: idx })}
                                 className="col-start-1 row-start-1 w-full h-full bg-transparent outline-none focus:bg-white focus:ring-1 focus:ring-blue-400 px-2 py-1.5 rounded transition-all text-gray-700 resize-none overflow-hidden font-sans text-sm break-all"
                                 placeholder="Ketik..."
                                 rows={1}
@@ -476,7 +576,9 @@ export default function ScanLog() {
                           <td 
                             key={col.id} 
                             style={{ width: col.width, minWidth: col.width, maxWidth: col.width }} 
-                            className={`p-3 align-top ${tdBorderClass}`}
+                            className={`p-3 align-top border-r border-gray-100 transition-colors ${tdBorderClass} ${activeBg}`}
+                            onMouseDown={() => { setIsDraggingGrid(true); setSelection({ startR: index, startC: idx, endR: index, endC: idx }); }}
+                            onMouseEnter={() => { if (isDraggingGrid) setSelection(prev => prev ? { ...prev, endR: index, endC: idx } : null); }}
                           >
                             {cellContent}
                           </td>
