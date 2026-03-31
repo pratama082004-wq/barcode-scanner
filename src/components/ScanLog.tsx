@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import * as XLSX from "xlsx";
+import * as XLSX from "xlsx-js-style";
 import { 
   TrashIcon, ArrowPathIcon, ArrowUturnLeftIcon, ArrowUturnRightIcon, 
   PlusIcon, ChevronDownIcon, DocumentDuplicateIcon, PencilIcon, 
-  ChevronLeftIcon, ChevronRightIcon, PlusCircleIcon, Squares2X2Icon 
+  ChevronLeftIcon, ChevronRightIcon, PlusCircleIcon, Squares2X2Icon,
+  DocumentArrowDownIcon, ArrowsUpDownIcon
 } from "@heroicons/react/24/outline";
 import Modal from "./ui/Modal"; 
 
@@ -47,15 +48,22 @@ export default function ScanLog() {
   const [draggedSheet, setDraggedSheet] = useState<string | null>(null);
   
   const [viewGrid, setViewGrid] = useState<boolean>(false);
+  
+  // --- STATE BARU: Fitur Sorting (Terbaru / Terlama) ---
+  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
+
   const [resizingCol, setResizingCol] = useState<{ id: string, startX: number, startWidth: number } | null>(null);
   const [draggedColId, setDraggedColId] = useState<string | null>(null);
 
-  // --- STATE BARU: Sistem Blok & Copy Paste Ala Excel ---
   const [selection, setSelection] = useState<{startR: number, startC: number, endR: number, endC: number} | null>(null);
   const [isDraggingGrid, setIsDraggingGrid] = useState<boolean>(false);
 
-  const [pastStates, setPastStates] = useState<ScanItem[][]>([]);
-  const [futureStates, setFutureStates] = useState<ScanItem[][]>([]);
+  const [exportMenuOpen, setExportMenuOpen] = useState<boolean>(false);
+  const [selectedExportSheets, setSelectedExportSheets] = useState<string[]>([]);
+  const [exportFormat, setExportFormat] = useState<'single' | 'multiple'>('single');
+
+  const [pastStates, setPastStates] = useState<{items: ScanItem[], layouts: Record<string, ColumnDef[]>, sheetsList: string[]}[]>([]);
+  const [futureStates, setFutureStates] = useState<{items: ScanItem[], layouts: Record<string, ColumnDef[]>, sheetsList: string[]}[]>([]);
 
   const [deleteConfirm, setDeleteConfirm] = useState({ isOpen: false, itemId: null as string | null, barcodeId: "" });
   const [resetConfirmOpen, setResetConfirmOpen] = useState<boolean>(false);
@@ -64,7 +72,10 @@ export default function ScanLog() {
   const [deleteSheetConfirm, setDeleteSheetConfirm] = useState({ isOpen: false, sheetName: "" });
 
   const anyModalOpen = deleteConfirm.isOpen || resetConfirmOpen || alertModal.isOpen || showNewSheetModal || editingSheet !== null || deleteColConfirm.isOpen || deleteSheetConfirm.isOpen;
+  
   const menuRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const exportMenuRef = useRef<HTMLDivElement>(null); 
 
   useEffect(() => {
     setIsMounted(true);
@@ -72,7 +83,11 @@ export default function ScanLog() {
     const savedSheets = localStorage.getItem("winteq_scanner_sheets");
     const savedLayouts = localStorage.getItem("winteq_scanner_layouts");
     if (savedData) setScannedItems(JSON.parse(savedData));
-    if (savedSheets) setSheets(JSON.parse(savedSheets));
+    if (savedSheets) {
+      const parsedSheets = JSON.parse(savedSheets);
+      setSheets(parsedSheets);
+      setSelectedExportSheets(parsedSheets); 
+    }
     if (savedLayouts) setSheetLayouts(JSON.parse(savedLayouts));
   }, []);
 
@@ -89,12 +104,18 @@ export default function ScanLog() {
     : (sheetLayouts[activeSheet] || BASE_COLUMNS);
 
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => { if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpenFor(null); };
+    const handleClickOutside = (e: MouseEvent) => { 
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpenFor(null); 
+      if (tableRef.current && !tableRef.current.contains(e.target as Node)) setSelection(null);
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) setExportMenuOpen(false);
+    };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const displayedItems = activeSheet === "All Data" ? scannedItems : scannedItems.filter(item => (item.category || "Default") === activeSheet);
+  // --- LOGIKA SORTING BARU UNTUK TAMPILAN WEB ---
+  const baseDisplayedItems = activeSheet === "All Data" ? scannedItems : scannedItems.filter(item => (item.category || "Default") === activeSheet);
+  const displayedItems = sortOrder === 'newest' ? baseDisplayedItems : [...baseDisplayedItems].reverse();
 
   useEffect(() => {
     if (!resizingCol) return;
@@ -112,11 +133,10 @@ export default function ScanLog() {
     return () => { window.removeEventListener('mousemove', handleMouseMove); window.removeEventListener('mouseup', handleMouseUp); };
   }, [resizingCol, activeSheet]);
 
-  const saveHistory = () => { setPastStates((prev) => [...prev.slice(-19), scannedItems]); setFutureStates([]); };
-  const handleUndo = () => { if (pastStates.length === 0) return; const previousState = pastStates[pastStates.length - 1]; setPastStates((prev) => prev.slice(0, -1)); setFutureStates((prev) => [...prev, scannedItems]); setScannedItems(previousState); };
-  const handleRedo = () => { if (futureStates.length === 0) return; const nextState = futureStates[futureStates.length - 1]; setFutureStates((prev) => prev.slice(0, -1)); setPastStates((prev) => [...prev, scannedItems]); setScannedItems(nextState); };
+  const saveHistory = () => { setPastStates((prev) => [...prev.slice(-19), { items: scannedItems, layouts: sheetLayouts, sheetsList: sheets }]); setFutureStates([]); };
+  const handleUndo = () => { if (pastStates.length === 0) return; const previousState = pastStates[pastStates.length - 1]; setPastStates((prev) => prev.slice(0, -1)); setFutureStates((prev) => [...prev, { items: scannedItems, layouts: sheetLayouts, sheetsList: sheets }]); setScannedItems(previousState.items); setSheetLayouts(previousState.layouts); setSheets(previousState.sheetsList); };
+  const handleRedo = () => { if (futureStates.length === 0) return; const nextState = futureStates[futureStates.length - 1]; setFutureStates((prev) => prev.slice(0, -1)); setPastStates((prev) => [...prev, { items: scannedItems, layouts: sheetLayouts, sheetsList: sheets }]); setScannedItems(nextState.items); setSheetLayouts(nextState.layouts); setSheets(nextState.sheetsList); };
 
-  // --- LOGIKA COPY PASTE & BLOCKING ---
   useEffect(() => {
     const handleMouseUpGlobal = () => setIsDraggingGrid(false);
     window.addEventListener('mouseup', handleMouseUpGlobal);
@@ -165,7 +185,6 @@ export default function ScanLog() {
         for (let j = 0; j < cols.length; j++) {
           const targetC = minC + j; if (targetC >= currentLayout.length) break;
           const colDef = currentLayout[targetC]; const val = cols[j];
-          
           if (colDef.type === 'custom') updatedItem.custom_data[colDef.id] = val;
           else if (colDef.id === 'category') updatedItem.category = val;
           else if (colDef.id === 'barcode_id') updatedItem.barcode_id = val;
@@ -183,13 +202,13 @@ export default function ScanLog() {
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); handleRedo(); }
     };
     window.addEventListener('keydown', handleGlobalKeyDown); return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [pastStates, futureStates, scannedItems, anyModalOpen]);
+  }, [pastStates, futureStates, scannedItems, sheetLayouts, sheets, anyModalOpen]);
 
   useEffect(() => {
     const handleCopy = (e: ClipboardEvent) => {
       if (anyModalOpen || !selection) return;
       const textSelected = window.getSelection()?.toString();
-      if (textSelected && textSelected.length > 0) return; // Biarkan copy text biasa bekerja
+      if (textSelected && textSelected.length > 0) return; 
       const tsv = getGridDataString();
       if (tsv) { e.preventDefault(); e.clipboardData?.setData('text/plain', tsv); }
     };
@@ -197,9 +216,7 @@ export default function ScanLog() {
       if (anyModalOpen || !selection) return;
       const activeEl = document.activeElement;
       const isInputActive = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
-      // Jika cuma 1 sel yg diblok dan kursor lagi kedip-kedip di dalamnya, paste ke dalam teksnya saja.
       if (isInputActive && selection.startR === selection.endR && selection.startC === selection.endC) return; 
-      
       e.preventDefault();
       const clipboardData = e.clipboardData?.getData('Text');
       if (clipboardData) handleGridPaste(clipboardData);
@@ -236,6 +253,7 @@ export default function ScanLog() {
   };
 
   const handleAddColumn = (insertAfterIndex: number) => {
+    saveHistory(); 
     const newCol: ColumnDef = { id: `custom_${Date.now()}`, name: 'KOLOM BARU', type: 'custom', width: 180 };
     const layout = [...(sheetLayouts[activeSheet] || BASE_COLUMNS)];
     layout.splice(insertAfterIndex + 1, 0, newCol);
@@ -273,6 +291,7 @@ export default function ScanLog() {
   const handleColDrop = (e: React.DragEvent, targetColId: string) => {
     e.preventDefault();
     if (!draggedColId || draggedColId === targetColId) return;
+    saveHistory();
     const layout = [...(sheetLayouts[activeSheet] || BASE_COLUMNS)];
     const fromIdx = layout.findIndex(c => c.id === draggedColId);
     const toIdx = layout.findIndex(c => c.id === targetColId);
@@ -294,6 +313,7 @@ export default function ScanLog() {
     }
     saveHistory();
     setSheets(sheets.map(s => s === oldName ? newName : s));
+    setSelectedExportSheets(prev => prev.map(s => s === oldName ? newName : s));
     setScannedItems(scannedItems.map(i => i.category === oldName ? { ...i, category: newName } : i));
     
     const newLayouts = { ...sheetLayouts };
@@ -311,6 +331,7 @@ export default function ScanLog() {
     if (!sheetToDelete) return;
     saveHistory();
     setSheets(sheets.filter(s => s !== sheetToDelete));
+    setSelectedExportSheets(prev => prev.filter(s => s !== sheetToDelete));
     setScannedItems(scannedItems.filter(i => i.category !== sheetToDelete));
     
     const newLayouts = { ...sheetLayouts };
@@ -326,6 +347,7 @@ export default function ScanLog() {
     let newName = `${sheetToDup} (Copy)`; let counter = 1;
     while (sheets.includes(newName)) { counter++; newName = `${sheetToDup} (Copy ${counter})`; }
     setSheets([...sheets, newName]);
+    setSelectedExportSheets([...selectedExportSheets, newName]); 
     setSheetLayouts({...sheetLayouts, [newName]: sheetLayouts[sheetToDup] || BASE_COLUMNS});
     const itemsToCopy = scannedItems.filter(i => i.category === sheetToDup);
     const duplicatedItems = itemsToCopy.map(i => ({ ...i, id: crypto.randomUUID(), category: newName }));
@@ -336,6 +358,7 @@ export default function ScanLog() {
   const handleMoveSheet = (sheet: string, direction: 'left' | 'right') => {
     const idx = sheets.indexOf(sheet);
     if ((direction === 'left' && idx <= 1) || (direction === 'right' && idx === sheets.length - 1)) return;
+    saveHistory(); 
     const newSheets = [...sheets]; const swapIdx = direction === 'left' ? idx - 1 : idx + 1;
     [newSheets[idx], newSheets[swapIdx]] = [newSheets[swapIdx], newSheets[idx]];
     setSheets(newSheets); setMenuOpenFor(null);
@@ -343,6 +366,7 @@ export default function ScanLog() {
   const handleDragStart = (e: React.DragEvent, sheet: string) => { setDraggedSheet(sheet); e.dataTransfer.effectAllowed = 'move'; };
   const handleDrop = (e: React.DragEvent, targetSheet: string) => {
     e.preventDefault(); if (!draggedSheet || draggedSheet === targetSheet || targetSheet === "All Data") return;
+    saveHistory();
     const newSheets = [...sheets]; const draggedIdx = newSheets.indexOf(draggedSheet); const targetIdx = newSheets.indexOf(targetSheet);
     newSheets.splice(draggedIdx, 1); newSheets.splice(targetIdx, 0, draggedSheet);
     setSheets(newSheets); setDraggedSheet(null);
@@ -352,35 +376,149 @@ export default function ScanLog() {
   const confirmDeleteRowAction = () => { if (deleteConfirm.itemId) { saveHistory(); setScannedItems((prev) => prev.filter((item) => item.id !== deleteConfirm.itemId)); } setDeleteConfirm({ isOpen: false, itemId: null, barcodeId: "" }); };
   const confirmResetDataAction = () => { saveHistory(); if (activeSheet === "All Data") setScannedItems([]); else setScannedItems((prev) => prev.filter(item => (item.category || "Default") !== activeSheet)); setResetConfirmOpen(false); };
   
-  const exportToExcelWithAlert = () => {
-    if (displayedItems.length === 0) return setAlertModal({ isOpen: true, title: "Data Kosong", message: "Belum ada data pindaian barcode di sheet ini." });
-    const worksheetData = displayedItems.map((item, i) => {
-      const row: any = {};
-      currentLayout.forEach(col => {
-        if (col.id === 'no') row[col.name] = i + 1;
-        else if (col.id === 'barcode_id') row[col.name] = item.barcode_id;
-        else if (col.id === 'created_at') row[col.name] = item.created_at;
-        else if (col.id === 'category') row[col.name] = item.category || 'Default';
-        else row[col.name] = item.custom_data?.[col.id] || "";
+  const handleExportCheckboxToggle = (sheetName: string) => {
+    if (sheetName === "All Data") {
+      if (selectedExportSheets.length === sheets.length) setSelectedExportSheets([]);
+      else setSelectedExportSheets([...sheets]);
+    } else {
+      let newSelected: string[];
+      if (selectedExportSheets.includes(sheetName)) {
+        newSelected = selectedExportSheets.filter(s => s !== sheetName && s !== "All Data");
+      } else {
+        newSelected = [...selectedExportSheets, sheetName];
+        const allIndividuals = sheets.filter(s => s !== "All Data");
+        const isAllIndividualSelected = allIndividuals.every(s => newSelected.includes(s));
+        if (isAllIndividualSelected && !newSelected.includes("All Data")) {
+          newSelected.push("All Data");
+        }
+      }
+      setSelectedExportSheets(newSelected);
+    }
+  };
+
+  // --- LOGIKA SORTING BARU UNTUK EXPORT ---
+  const createStyledWorksheet = (targetSheet: string) => {
+    const baseItems = targetSheet === "All Data" ? scannedItems : scannedItems.filter(i => (i.category || "Default") === targetSheet);
+    // Terapkan urutan yang sama persis dengan di layar web saat ini!
+    const items = sortOrder === 'newest' ? baseItems : [...baseItems].reverse();
+    
+    const layout = targetSheet === "All Data" ? [...BASE_COLUMNS, { id: 'category', name: 'KATEGORI', type: 'base', width: 200 }] : (sheetLayouts[targetSheet] || BASE_COLUMNS);
+
+    const headers = layout.map(col => col.name);
+
+    const rows = items.length === 0 
+      ? [layout.map((_, i) => i === 0 ? "Belum ada data pindaian di kategori ini." : "")]
+      : items.map((item, index) => {
+          return layout.map(col => {
+            if (col.id === 'no') return index + 1; 
+            if (col.id === 'barcode_id') return item.barcode_id;
+            if (col.id === 'created_at') return item.created_at;
+            if (col.id === 'category') return item.category || 'Default';
+            return item.custom_data?.[col.id] || "";
+          });
+        });
+
+    const aoaData = [headers, ...rows];
+    const ws = XLSX.utils.aoa_to_sheet(aoaData);
+
+    ws['!cols'] = layout.map(col => ({ wpx: col.width }));
+
+    for (const key in ws) {
+      if (key[0] === '!') continue; 
+
+      const cell = ws[key];
+      const rowIndex = parseInt(key.replace(/[A-Z]/g, ''));
+      
+      const colLetter = key.replace(/[0-9]/g, '');
+      const colIndex = XLSX.utils.decode_col(colLetter);
+      const colDef = layout[colIndex];
+
+      let hAlign = "left";
+      if (colDef && (colDef.id === 'no' || colDef.id === 'created_at' || colDef.id === 'category')) {
+        hAlign = "center";
+      }
+
+      cell.s = {
+        font: { name: "Arial", sz: 11, color: { rgb: "1F2937" } }, 
+        alignment: { horizontal: hAlign, vertical: "top", wrapText: true } 
+      };
+
+      if (viewGrid) {
+        cell.s.border = {
+          top: { style: "thin", color: { rgb: "9CA3AF" } },    
+          bottom: { style: "thin", color: { rgb: "9CA3AF" } },
+          left: { style: "thin", color: { rgb: "9CA3AF" } },
+          right: { style: "thin", color: { rgb: "9CA3AF" } }
+        };
+      } else {
+        cell.s.border = {
+          bottom: { style: "thin", color: { rgb: "D1D5DB" } } 
+        };
+      }
+
+      if (rowIndex === 1) {
+        cell.s.font.bold = true;
+        cell.s.font.color = { rgb: "111827" }; 
+        cell.s.fill = { fgColor: { rgb: "E5E7EB" } }; 
+        cell.s.alignment.horizontal = "center"; 
+        cell.s.alignment.vertical = "center";
+        
+        if (!viewGrid) {
+           cell.s.border = {
+             bottom: { style: "medium", color: { rgb: "9CA3AF" } } 
+           };
+        }
+      }
+    }
+
+    return ws;
+  };
+
+  const executeExport = async () => {
+    if (selectedExportSheets.length === 0) {
+      setAlertModal({ isOpen: true, title: "Pilih Kategori", message: "Silakan centang minimal satu kategori untuk diunduh." });
+      return;
+    }
+
+    setExportMenuOpen(false);
+
+    if (exportFormat === 'single') {
+      const workbook = XLSX.utils.book_new();
+      const sortedSheets = [...selectedExportSheets].sort((a, b) => a === "All Data" ? -1 : b === "All Data" ? 1 : 0);
+      
+      sortedSheets.forEach(sheetName => {
+        const worksheet = createStyledWorksheet(sheetName);
+        XLSX.utils.book_append_sheet(workbook, worksheet, sheetName.substring(0, 31)); 
       });
-      return row;
-    });
-    const worksheet = XLSX.utils.json_to_sheet(worksheetData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, activeSheet.substring(0, 31)); 
-    XLSX.writeFile(workbook, `Laporan_Winteq_${activeSheet.replace(/\s+/g, '_')}.xlsx`);
+      XLSX.writeFile(workbook, `Laporan_Gabungan_Winteq.xlsx`);
+      
+    } else {
+      for (let i = 0; i < selectedExportSheets.length; i++) {
+        const sheetName = selectedExportSheets[i];
+        const worksheet = createStyledWorksheet(sheetName);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, sheetName.substring(0, 31));
+        XLSX.writeFile(workbook, `Laporan_${sheetName.replace(/\s+/g, '_')}_Winteq.xlsx`);
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+    }
   };
 
   const handleCreateNewSheet = () => {
     const sheetName = newSheetName.trim();
-    if (sheetName && !sheets.includes(sheetName) && sheetName !== "Default") { setSheets([...sheets, sheetName]); setActiveSheet(sheetName); }
+    if (sheetName && !sheets.includes(sheetName) && sheetName !== "Default") { 
+      saveHistory(); 
+      setSheets([...sheets, sheetName]); 
+      setSelectedExportSheets([...selectedExportSheets, sheetName]); 
+      setActiveSheet(sheetName); 
+    }
     setShowNewSheetModal(false); setNewSheetName("");
   };
 
   if (!isMounted) return null;
 
-  const thBorderClass = viewGrid ? "border border-gray-300 bg-gray-100" : "border-b border-gray-200 bg-white";
-  const tdBorderClass = viewGrid ? "border border-gray-300" : "border-b border-gray-100";
+  const thBorderClass = viewGrid ? "border border-gray-400 bg-gray-100" : "border-b border-gray-300 bg-white";
+  const tdBorderClass = viewGrid ? "border border-gray-300" : "border-b border-gray-200";
 
   return (
     <>
@@ -422,7 +560,7 @@ export default function ScanLog() {
       <div className="w-full h-[calc(100vh-8rem)] flex flex-col">
         <div className="bg-white rounded-t-xl shadow-sm border border-gray-100 flex-1 flex flex-col min-h-0 overflow-hidden">
           
-          <div className="p-4 sm:p-5 border-b border-gray-100 flex flex-col xl:flex-row justify-between items-start xl:items-center bg-gray-50/50 gap-4 xl:gap-0 shrink-0">
+          <div className="p-4 sm:p-5 border-b border-gray-100 flex flex-col xl:flex-row justify-between items-start xl:items-center bg-gray-50/50 gap-4 xl:gap-0 shrink-0 relative">
             <div className="flex items-center space-x-4">
               <h3 className="font-bold text-gray-800 text-lg">{activeSheet === "All Data" ? "Semua Data Pindaian" : `Kategori: ${activeSheet}`}</h3>
               <div className="bg-blue-100 text-blue-800 text-sm font-bold px-3 py-1.5 rounded-md border border-blue-200 shadow-sm flex items-center">
@@ -431,6 +569,18 @@ export default function ScanLog() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
+              {/* TOMBOL TOGGLE SORTING TERBARU/TERLAMA */}
+              <button 
+                onClick={() => { setSortOrder(prev => prev === 'newest' ? 'oldest' : 'newest'); setSelection(null); }} 
+                className="p-2 mr-2 rounded-lg transition-colors flex items-center shadow-sm bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"
+                title="Urutkan Data"
+              >
+                <ArrowsUpDownIcon className="w-4 h-4 md:mr-1.5" />
+                <span className="text-sm font-medium hidden md:inline">
+                  {sortOrder === 'newest' ? 'Terbaru' : 'Terlama'}
+                </span>
+              </button>
+
               <button 
                 onClick={() => setViewGrid(!viewGrid)} 
                 className={`p-2 mr-2 rounded-lg transition-colors flex items-center shadow-sm ${viewGrid ? 'bg-blue-100 text-blue-700 border border-blue-200' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`} 
@@ -445,13 +595,64 @@ export default function ScanLog() {
                 <button onClick={handleRedo} disabled={futureStates.length === 0} className={`p-1.5 rounded-md flex items-center transition-all ml-1 ${futureStates.length > 0 ? "bg-white text-gray-700 shadow-sm hover:text-blue-600" : "text-gray-400 cursor-not-allowed opacity-60"}`} title="Redo (Ctrl+Y)"><ArrowUturnRightIcon className="w-4 h-4" /></button>
               </div>
 
-              <button onClick={exportToExcelWithAlert} className="bg-green-600 hover:bg-green-700 text-white text-sm font-medium py-2 px-4 rounded-lg shadow-sm">Unduh Excel</button>
+              <div className="relative" ref={exportMenuRef}>
+                <button 
+                  onClick={() => setExportMenuOpen(!exportMenuOpen)} 
+                  className="bg-green-600 hover:bg-green-700 text-white text-sm font-medium py-2 px-4 rounded-lg shadow-sm flex items-center transition-colors"
+                >
+                  <DocumentArrowDownIcon className="w-4 h-4 mr-1.5" />
+                  Unduh Excel
+                  <ChevronDownIcon className={`w-3.5 h-3.5 ml-2 transition-transform ${exportMenuOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {exportMenuOpen && (
+                  <div className="absolute right-0 mt-2 w-72 bg-white rounded-xl shadow-xl border border-gray-200 z-50 overflow-hidden flex flex-col">
+                    <div className="p-3 border-b border-gray-100 bg-gray-50">
+                      <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Pilih Data Kategori</h4>
+                    </div>
+                    <div className="max-h-48 overflow-y-auto p-2">
+                      {sheets.map(sheet => (
+                        <label key={sheet} className="flex items-center p-2 hover:bg-gray-50 rounded cursor-pointer">
+                          <input 
+                            type="checkbox" 
+                            checked={sheet === "All Data" ? selectedExportSheets.length === sheets.length : selectedExportSheets.includes(sheet)}
+                            onChange={() => handleExportCheckboxToggle(sheet)}
+                            className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                          />
+                          <span className={`ml-3 text-sm ${sheet === "All Data" ? "font-bold text-gray-800" : "text-gray-600"}`}>{sheet}</span>
+                        </label>
+                      ))}
+                    </div>
+                    
+                    <div className="p-3 border-t border-gray-100 bg-gray-50">
+                      <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Format Unduhan</h4>
+                      <div className="space-y-2">
+                        <label className="flex items-center cursor-pointer">
+                          <input type="radio" name="exportFormat" value="single" checked={exportFormat === 'single'} onChange={() => setExportFormat('single')} className="w-4 h-4 text-green-600 border-gray-300 focus:ring-green-500" />
+                          <span className="ml-3 text-sm text-gray-700">Download dalam satu File</span>
+                        </label>
+                        <label className="flex items-center cursor-pointer">
+                          <input type="radio" name="exportFormat" value="multiple" checked={exportFormat === 'multiple'} onChange={() => setExportFormat('multiple')} className="w-4 h-4 text-green-600 border-gray-300 focus:ring-green-500" />
+                          <span className="ml-3 text-sm text-gray-700">Download File terpisah</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="p-3 border-t border-gray-100">
+                      <button onClick={executeExport} className="w-full bg-green-600 hover:bg-green-700 text-white text-sm font-bold py-2.5 rounded-lg transition-colors flex items-center justify-center">
+                        Eksekusi Unduhan
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {displayedItems.length > 0 && <button onClick={() => setResetConfirmOpen(true)} className="bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium py-2 px-4 rounded-lg border border-red-200">{activeSheet === "All Data" ? "Reset Semua" : "Kosongkan Sheet"}</button>}
             </div>
           </div>
           
           <div className="flex-1 overflow-auto bg-white relative">
-            <table className="w-max min-w-full text-left border-collapse table-fixed">
+            <table ref={tableRef} className="w-max min-w-full text-left border-collapse table-fixed outline-none">
               <thead className="sticky top-0 shadow-sm z-10">
                 <tr className="text-xs tracking-wider text-gray-600">
                   
@@ -522,7 +723,6 @@ export default function ScanLog() {
                     <tr key={item.id} className="hover:bg-blue-50/40 transition-colors group">
                       {currentLayout.map((col, idx) => {
                         
-                        // LOGIKA BLOK WARNA BIRU
                         const isSelected = selection && 
                           index >= Math.min(selection.startR, selection.endR) && 
                           index <= Math.max(selection.startR, selection.endR) && 
@@ -533,7 +733,7 @@ export default function ScanLog() {
 
                         let cellContent;
                         if (col.id === 'no') {
-                          cellContent = <span id={`cell-${index}-${idx}`} tabIndex={0} onKeyDown={(e) => handleCellKeyDown(e as any, index, idx)} className="block outline-none">{index + 1}</span>;
+                          cellContent = <span id={`cell-${index}-${idx}`} tabIndex={0} onKeyDown={(e) => handleCellKeyDown(e as any, index, idx)} className="block outline-none text-center w-full">{index + 1}</span>;
                         } else if (col.id === 'barcode_id') {
                           cellContent = (
                             <input id={`cell-${index}-${idx}`} type="text" value={item.barcode_id} onChange={(e) => {
@@ -543,12 +743,12 @@ export default function ScanLog() {
                             />
                           );
                         } else if (col.id === 'created_at') {
-                          cellContent = <span id={`cell-${index}-${idx}`} tabIndex={0} onKeyDown={(e) => handleCellKeyDown(e as any, index, idx)} className="block text-gray-600 outline-none">{item.created_at}</span>;
+                          cellContent = <span id={`cell-${index}-${idx}`} tabIndex={0} onKeyDown={(e) => handleCellKeyDown(e as any, index, idx)} className="block text-gray-600 outline-none text-center w-full">{item.created_at}</span>;
                         } else if (col.id === 'category') {
                           cellContent = sheets.length === 1 
-                            ? <span id={`cell-${index}-${idx}`} tabIndex={0} className="px-3 py-1 bg-gray-100 text-gray-500 rounded text-xs outline-none">Default</span>
+                            ? <span id={`cell-${index}-${idx}`} tabIndex={0} className="px-3 py-1 bg-gray-100 text-gray-500 rounded text-xs outline-none flex justify-center w-full">Default</span>
                             : (
-                              <select id={`cell-${index}-${idx}`} value={item.category || "Default"} onChange={(e) => handleCategoryChange(item.id, e.target.value)} onKeyDown={(e) => handleCellKeyDown(e, index, idx)} onFocus={() => setSelection({ startR: index, startC: idx, endR: index, endC: idx })} className="text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-700 py-1 px-1 outline-none w-full cursor-pointer hover:bg-gray-50">
+                              <select id={`cell-${index}-${idx}`} value={item.category || "Default"} onChange={(e) => handleCategoryChange(item.id, e.target.value)} onKeyDown={(e) => handleCellKeyDown(e, index, idx)} onFocus={() => setSelection({ startR: index, startC: idx, endR: index, endC: idx })} className="text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-700 py-1 px-1 outline-none w-full cursor-pointer hover:bg-gray-50 text-center">
                                 <option value="Default">Default</option>
                                 {sheets.filter(s => s !== "All Data").map(sheet => <option key={sheet} value={sheet}>{sheet}</option>)}
                               </select>
@@ -595,7 +795,6 @@ export default function ScanLog() {
           </div>
         </div>
 
-        {/* FOOTER: GOOGLE SHEETS STYLE TABS DENGAN DRAG & DROP SERTA DROPDOWN */}
         <div className="bg-gray-100 border border-t-0 border-gray-200 rounded-b-xl flex flex-wrap items-center px-2 min-h-12 shrink-0 shadow-sm z-20 pb-1 pt-1 gap-y-1">
           <button onClick={() => setShowNewSheetModal(true)} className="p-1.5 text-gray-500 hover:bg-gray-300 hover:text-gray-800 rounded mr-2 transition-colors flex-shrink-0" title="Tambah Sheet Baru"><PlusIcon className="w-5 h-5" /></button>
           <div className="h-6 w-px bg-gray-300 mx-1 mr-2 flex-shrink-0"></div>

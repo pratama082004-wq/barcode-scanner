@@ -318,7 +318,7 @@ export default function DashboardScan() {
                 {scannedItems.length === 0 ? (
                   <tr><td colSpan={5} className="p-16 text-center text-gray-400">Belum ada data pindaian barcode.</td></tr>
                 ) : (
-                  scannedItems.slice(0, 10).map((item, index) => (
+                  scannedItems.slice(0, 8).map((item, index) => (
                     <tr key={item.id} className="border-b border-gray-100 last:border-0 hover:bg-blue-50/30 transition-colors group">
                       <td className="p-4 text-gray-600">{index + 1}</td>
                       <td className="p-4 font-medium text-gray-900 break-all">{item.barcode_id}</td>
