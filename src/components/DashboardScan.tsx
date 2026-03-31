@@ -1,8 +1,11 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import * as XLSX from "xlsx";
-import { TrashIcon, ArrowPathIcon, ExclamationTriangleIcon, ArrowUturnLeftIcon, ArrowUturnRightIcon, PlusIcon, FolderOpenIcon } from "@heroicons/react/24/outline";
+import * as XLSX from "xlsx-js-style";
+import { 
+  TrashIcon, ArrowPathIcon, ExclamationTriangleIcon, ArrowUturnLeftIcon, 
+  ArrowUturnRightIcon, PlusIcon, FolderOpenIcon, DocumentArrowDownIcon 
+} from "@heroicons/react/24/outline";
 import Modal from "./ui/Modal"; 
 
 type ScanItem = { 
@@ -40,32 +43,54 @@ export default function DashboardScan() {
     setIsMounted(true);
     const savedData = localStorage.getItem("winteq_scanner_data");
     const savedSheets = localStorage.getItem("winteq_scanner_sheets");
+    
+    // BACA MEMORI UI KATEGORI DARI LOCAL STORAGE
+    const savedCategory = localStorage.getItem("winteq_dashboard_selectedCategory");
+
     if (savedData) {
       const parsed = JSON.parse(savedData);
       setScannedItems(parsed);
       latestItemsRef.current = parsed; 
     }
-    if (savedSheets) setSheets(JSON.parse(savedSheets));
+    if (savedSheets) {
+      const parsedSheets = JSON.parse(savedSheets);
+      setSheets(parsedSheets);
+      
+      // Set kategori dari memori, pastikan sheet-nya masih ada
+      if (savedCategory && (savedCategory === "Default" || parsedSheets.includes(savedCategory))) {
+        setSelectedCategory(savedCategory);
+      }
+    }
   }, []);
 
   useEffect(() => {
     if (isMounted) {
       localStorage.setItem("winteq_scanner_data", JSON.stringify(scannedItems));
       localStorage.setItem("winteq_scanner_sheets", JSON.stringify(sheets));
+      
+      // SIMPAN MEMORI UI KATEGORI KE LOCAL STORAGE
+      localStorage.setItem("winteq_dashboard_selectedCategory", selectedCategory);
     }
-  }, [scannedItems, sheets, isMounted]);
+  }, [scannedItems, sheets, selectedCategory, isMounted]);
 
   useEffect(() => {
     if (!anyModalOpen) inputRef.current?.focus();
   }, [scannedItems, anyModalOpen]);
 
-  const saveHistory = () => { setPastStates((prev) => [...prev.slice(-19), latestItemsRef.current]); setFutureStates([]); };
+  const saveHistory = () => { 
+    const snapshot = [...latestItemsRef.current]; 
+    setPastStates((prev) => [...prev.slice(-19), snapshot]); 
+    setFutureStates([]); 
+  };
   
   const handleUndo = () => { 
     if (pastStates.length === 0) return; 
     const previousState = pastStates[pastStates.length - 1]; 
     setPastStates((prev) => prev.slice(0, -1)); 
-    setFutureStates((prev) => [...prev, latestItemsRef.current]); 
+    
+    const snapshot = [...latestItemsRef.current];
+    setFutureStates((prev) => [...prev, snapshot]); 
+    
     latestItemsRef.current = previousState; 
     setScannedItems(previousState); 
   };
@@ -74,7 +99,10 @@ export default function DashboardScan() {
     if (futureStates.length === 0) return; 
     const nextState = futureStates[futureStates.length - 1]; 
     setFutureStates((prev) => prev.slice(0, -1)); 
-    setPastStates((prev) => [...prev, latestItemsRef.current]); 
+    
+    const snapshot = [...latestItemsRef.current];
+    setPastStates((prev) => [...prev, snapshot]); 
+    
     latestItemsRef.current = nextState; 
     setScannedItems(nextState); 
   };
@@ -118,26 +146,24 @@ export default function DashboardScan() {
 
     if (isDuplicate) {
       setDuplicateModal({ isOpen: true, pendingBarcode: currentBarcode });
-      setBarcodeData(""); // Tetap dikosongkan agar input siap untuk aksi selanjutnya
+      setBarcodeData(""); 
       return;
     }
     
     addBarcode(currentBarcode);
   };
 
-  // --- SOLUSI: Pisahkan KeyDown (Pencegah Bug) dan KeyUp (Eksekutor) ---
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
-      e.preventDefault(); // Mencegah form ke-submit secara otomatis
+      e.preventDefault(); 
     }
   };
 
   const handleKeyUp = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
-      submitBarcodeData(); // Hanya dieksekusi SAAT JARI DILEPAS dari tombol
+      submitBarcodeData(); 
     }
   };
-  // ---------------------------------------------------------------------
 
   const handleCreateNewSheet = () => {
     const sheetName = newSheetName.trim();
@@ -169,9 +195,50 @@ export default function DashboardScan() {
   
   const exportToExcelWithAlert = () => {
     if (latestItemsRef.current.length === 0) return setAlertModal({ isOpen: true, title: "Data Kosong", message: "Belum ada data pindaian barcode yang bisa diunduh." });
-    const dataToExport = latestItemsRef.current.slice(0, 10).map((item, i) => ({ "No": i + 1, "ID Barcode": item.barcode_id, "Waktu Scan": item.created_at, "Kategori": item.category || "Default" }));
-    const worksheet = XLSX.utils.json_to_sheet(dataToExport); const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "10_Log_Terbaru"); XLSX.writeFile(workbook, "Laporan_Cepat_Winteq.xlsx");
+    
+    const dataToExport = latestItemsRef.current.slice(0, 10);
+    const headers = ["NO", "ID BARCODE", "WAKTU SCAN", "KATEGORI"];
+    
+    const rows = dataToExport.map((item, i) => [
+      i + 1,
+      item.barcode_id,
+      item.created_at,
+      item.category || "Default"
+    ]);
+
+    const aoaData = [headers, ...rows];
+    const ws = XLSX.utils.aoa_to_sheet(aoaData);
+
+    ws['!cols'] = [{ wpx: 60 }, { wpx: 220 }, { wpx: 200 }, { wpx: 150 }];
+
+    for (const key in ws) {
+      if (key[0] === '!') continue; 
+      const cell = ws[key];
+      const rowIndex = parseInt(key.replace(/[A-Z]/g, ''));
+      const colLetter = key.replace(/[0-9]/g, '');
+
+      let hAlign = "left";
+      if (colLetter === 'A' || colLetter === 'C' || colLetter === 'D') hAlign = "center";
+
+      cell.s = {
+        font: { name: "Arial", sz: 11, color: { rgb: "1F2937" } }, 
+        alignment: { horizontal: hAlign, vertical: "top", wrapText: true },
+        border: { bottom: { style: "thin", color: { rgb: "D1D5DB" } } }
+      };
+
+      if (rowIndex === 1) {
+        cell.s.font.bold = true;
+        cell.s.font.color = { rgb: "111827" }; 
+        cell.s.fill = { fgColor: { rgb: "E5E7EB" } }; 
+        cell.s.alignment.horizontal = "center"; 
+        cell.s.alignment.vertical = "center";
+        cell.s.border = { bottom: { style: "medium", color: { rgb: "9CA3AF" } } };
+      }
+    }
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, ws, "10_Log_Terbaru"); 
+    XLSX.writeFile(workbook, "Laporan_Cepat_Winteq.xlsx");
   };
 
   const handleDuplicateCancel = () => setDuplicateModal({ isOpen: false, pendingBarcode: "" });
@@ -254,11 +321,8 @@ export default function DashboardScan() {
                 ref={inputRef} 
                 value={barcodeData} 
                 onChange={(e) => setBarcodeData(e.target.value)} 
-                
-                // MENGGUNAKAN LOGIKA BARU DI SINI 👇
                 onKeyDown={handleKeyDown} 
                 onKeyUp={handleKeyUp} 
-                
                 disabled={anyModalOpen} 
                 className="w-full p-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-base disabled:bg-gray-100 disabled:cursor-not-allowed" 
                 placeholder={anyModalOpen ? "Menunggu aksi..." : "Scan barcode di sini..."} 
@@ -299,7 +363,10 @@ export default function DashboardScan() {
                 <button onClick={handleUndo} disabled={pastStates.length === 0} className={`p-1.5 rounded-md flex items-center transition-all ${pastStates.length > 0 ? "bg-white text-gray-700 shadow-sm hover:text-blue-600" : "text-gray-400 cursor-not-allowed opacity-60"}`} title="Undo (Ctrl+Z)"><ArrowUturnLeftIcon className="w-4 h-4" /></button>
                 <button onClick={handleRedo} disabled={futureStates.length === 0} className={`p-1.5 rounded-md flex items-center transition-all ml-1 ${futureStates.length > 0 ? "bg-white text-gray-700 shadow-sm hover:text-blue-600" : "text-gray-400 cursor-not-allowed opacity-60"}`} title="Redo (Ctrl+Y)"><ArrowUturnRightIcon className="w-4 h-4" /></button>
               </div>
-              <button onClick={exportToExcelWithAlert} className="bg-green-600 hover:bg-green-700 text-white text-sm font-medium py-2 px-4 rounded-lg shadow-sm">Unduh Excel</button>
+              <button onClick={exportToExcelWithAlert} className="bg-green-600 hover:bg-green-700 text-white text-sm font-medium py-2 px-4 rounded-lg shadow-sm flex items-center">
+                <DocumentArrowDownIcon className="w-4 h-4 mr-1.5" />
+                Unduh Excel
+              </button>
               {scannedItems.length > 0 && <button onClick={() => setResetConfirmOpen(true)} className="bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium py-2 px-4 rounded-lg border border-red-200">Reset Data</button>}
             </div>
           </div>
@@ -307,9 +374,9 @@ export default function DashboardScan() {
             <table className="w-full text-left border-collapse min-w-[500px]">
               <thead className="sticky top-0 bg-white shadow-sm z-10">
                 <tr className="text-xs uppercase tracking-wider text-gray-500 border-b border-gray-200">
-                  <th className="p-4 font-semibold w-16">No</th>
+                  <th className="p-4 font-semibold w-16 text-center">No</th>
                   <th className="p-4 font-semibold">ID Barcode</th>
-                  <th className="p-4 font-semibold">Waktu Scan</th>
+                  <th className="p-4 font-semibold text-center">Waktu Scan</th>
                   <th className="p-4 font-semibold text-center w-32">Kategori</th>
                   <th className="p-4 font-semibold w-24 text-center">Aksi</th>
                 </tr>
@@ -318,11 +385,11 @@ export default function DashboardScan() {
                 {scannedItems.length === 0 ? (
                   <tr><td colSpan={5} className="p-16 text-center text-gray-400">Belum ada data pindaian barcode.</td></tr>
                 ) : (
-                  scannedItems.slice(0, 8).map((item, index) => (
+                  scannedItems.slice(0, 10).map((item, index) => (
                     <tr key={item.id} className="border-b border-gray-100 last:border-0 hover:bg-blue-50/30 transition-colors group">
-                      <td className="p-4 text-gray-600">{index + 1}</td>
+                      <td className="p-4 text-gray-600 text-center">{index + 1}</td>
                       <td className="p-4 font-medium text-gray-900 break-all">{item.barcode_id}</td>
-                      <td className="p-4 text-gray-600">{item.created_at}</td>
+                      <td className="p-4 text-gray-600 text-center">{item.created_at}</td>
                       <td className="p-4 text-center">
                         <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs font-medium border border-gray-200 inline-block max-w-[120px] truncate" title={item.category || "Default"}>
                           {item.category || "Default"}

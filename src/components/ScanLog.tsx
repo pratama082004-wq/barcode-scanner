@@ -48,8 +48,6 @@ export default function ScanLog() {
   const [draggedSheet, setDraggedSheet] = useState<string | null>(null);
   
   const [viewGrid, setViewGrid] = useState<boolean>(false);
-  
-  // --- STATE BARU: Fitur Sorting (Terbaru / Terlama) ---
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
 
   const [resizingCol, setResizingCol] = useState<{ id: string, startX: number, startWidth: number } | null>(null);
@@ -82,13 +80,27 @@ export default function ScanLog() {
     const savedData = localStorage.getItem("winteq_scanner_data");
     const savedSheets = localStorage.getItem("winteq_scanner_sheets");
     const savedLayouts = localStorage.getItem("winteq_scanner_layouts");
+    
+    // BACA MEMORI UI SETTINGS DARI LOCAL STORAGE
+    const savedActiveSheet = localStorage.getItem("winteq_scanlog_activeSheet");
+    const savedSortOrder = localStorage.getItem("winteq_scanlog_sortOrder");
+    const savedViewGrid = localStorage.getItem("winteq_scanlog_viewGrid");
+
     if (savedData) setScannedItems(JSON.parse(savedData));
     if (savedSheets) {
       const parsedSheets = JSON.parse(savedSheets);
       setSheets(parsedSheets);
       setSelectedExportSheets(parsedSheets); 
+      
+      // Pastikan savedActiveSheet masih ada di daftar sheet, kalau dihapus balik ke All Data
+      if (savedActiveSheet && parsedSheets.includes(savedActiveSheet)) {
+        setActiveSheet(savedActiveSheet);
+      }
     }
     if (savedLayouts) setSheetLayouts(JSON.parse(savedLayouts));
+    
+    if (savedSortOrder === 'newest' || savedSortOrder === 'oldest') setSortOrder(savedSortOrder);
+    if (savedViewGrid) setViewGrid(savedViewGrid === 'true');
   }, []);
 
   useEffect(() => {
@@ -96,8 +108,13 @@ export default function ScanLog() {
       localStorage.setItem("winteq_scanner_data", JSON.stringify(scannedItems));
       localStorage.setItem("winteq_scanner_sheets", JSON.stringify(sheets));
       localStorage.setItem("winteq_scanner_layouts", JSON.stringify(sheetLayouts));
+      
+      // SIMPAN MEMORI UI SETTINGS KE LOCAL STORAGE
+      localStorage.setItem("winteq_scanlog_activeSheet", activeSheet);
+      localStorage.setItem("winteq_scanlog_sortOrder", sortOrder);
+      localStorage.setItem("winteq_scanlog_viewGrid", String(viewGrid));
     }
-  }, [scannedItems, sheets, sheetLayouts, isMounted]);
+  }, [scannedItems, sheets, sheetLayouts, activeSheet, sortOrder, viewGrid, isMounted]);
 
   const currentLayout = activeSheet === "All Data"
     ? [...BASE_COLUMNS, { id: 'category', name: 'KATEGORI', type: 'base', width: 200 }]
@@ -113,7 +130,6 @@ export default function ScanLog() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // --- LOGIKA SORTING BARU UNTUK TAMPILAN WEB ---
   const baseDisplayedItems = activeSheet === "All Data" ? scannedItems : scannedItems.filter(item => (item.category || "Default") === activeSheet);
   const displayedItems = sortOrder === 'newest' ? baseDisplayedItems : [...baseDisplayedItems].reverse();
 
@@ -396,10 +412,8 @@ export default function ScanLog() {
     }
   };
 
-  // --- LOGIKA SORTING BARU UNTUK EXPORT ---
   const createStyledWorksheet = (targetSheet: string) => {
     const baseItems = targetSheet === "All Data" ? scannedItems : scannedItems.filter(i => (i.category || "Default") === targetSheet);
-    // Terapkan urutan yang sama persis dengan di layar web saat ini!
     const items = sortOrder === 'newest' ? baseItems : [...baseItems].reverse();
     
     const layout = targetSheet === "All Data" ? [...BASE_COLUMNS, { id: 'category', name: 'KATEGORI', type: 'base', width: 200 }] : (sheetLayouts[targetSheet] || BASE_COLUMNS);
@@ -569,7 +583,6 @@ export default function ScanLog() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              {/* TOMBOL TOGGLE SORTING TERBARU/TERLAMA */}
               <button 
                 onClick={() => { setSortOrder(prev => prev === 'newest' ? 'oldest' : 'newest'); setSelection(null); }} 
                 className="p-2 mr-2 rounded-lg transition-colors flex items-center shadow-sm bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"
