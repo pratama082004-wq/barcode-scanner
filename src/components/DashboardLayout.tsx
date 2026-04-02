@@ -1,13 +1,20 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { usePathname } from "next/navigation"; // Import pendeteksi URL
-import { ClipboardDocumentCheckIcon, Cog6ToothIcon, Bars3Icon, XMarkIcon, TableCellsIcon } from "@heroicons/react/24/outline";
+import { usePathname } from "next/navigation"; 
+import { 
+  ClipboardDocumentCheckIcon, 
+  Cog6ToothIcon, 
+  Bars3Icon, 
+  XMarkIcon, 
+  TableCellsIcon,
+  ClockIcon // Import icon jam untuk History
+} from "@heroicons/react/24/outline";
 import Link from "next/link";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true); 
-  const pathname = usePathname(); // Membaca URL saat ini (misal: '/' atau '/scan-log')
+  const pathname = usePathname(); // Membaca URL saat ini
 
   useEffect(() => {
     if (window.innerWidth < 768) setIsSidebarOpen(false);
@@ -29,7 +36,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <nav className="flex-1 py-6 space-y-2 overflow-hidden">
           
           {/* MENU 1: DASHBOARD SCAN */}
-          {/* Logika: Jika pathname adalah '/', maka beri warna biru. Jika bukan, beri warna abu-abu */}
           <Link href="/" className={`flex items-center px-4 py-3 mx-3 rounded-lg font-medium transition-colors group ${pathname === '/' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
             <ClipboardDocumentCheckIcon className={`w-6 h-6 flex-shrink-0 ml-1 ${pathname === '/' ? 'text-white' : 'text-slate-400 group-hover:text-white'}`} />
             <span className={`ml-4 whitespace-nowrap transition-all duration-300 ${isSidebarOpen ? "opacity-100" : "opacity-0 hidden"}`}>
@@ -38,7 +44,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </Link>
           
           {/* MENU 2: SCAN LOG */}
-          {/* Logika: Jika pathname adalah '/scan-log', maka beri warna biru. Jika bukan, beri warna abu-abu */}
           <Link href="/scan-log" className={`flex items-center px-4 py-3 mx-3 rounded-lg font-medium transition-colors group ${pathname === '/scan-log' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
             <TableCellsIcon className={`w-6 h-6 flex-shrink-0 ml-1 ${pathname === '/scan-log' ? 'text-white' : 'text-slate-400 group-hover:text-white'}`} />
             <span className={`ml-4 whitespace-nowrap transition-all duration-300 ${isSidebarOpen ? "opacity-100" : "opacity-0 hidden"}`}>
@@ -46,9 +51,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </span>
           </Link>
 
-          {/* MENU 3: PENGATURAN */}
-          <Link href="#" className="flex items-center px-4 py-3 mx-3 text-slate-400 hover:bg-slate-800 hover:text-white rounded-lg transition-colors group">
-            <Cog6ToothIcon className="w-6 h-6 flex-shrink-0 ml-1 text-slate-400 group-hover:text-white" />
+          {/* MENU 3: HISTORY ACTIVITY */}
+          <Link href="/history-activity" className={`flex items-center px-4 py-3 mx-3 rounded-lg font-medium transition-colors group ${pathname === '/history-activity' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
+            <ClockIcon className={`w-6 h-6 flex-shrink-0 ml-1 ${pathname === '/history-activity' ? 'text-white' : 'text-slate-400 group-hover:text-white'}`} />
+            <span className={`ml-4 whitespace-nowrap transition-all duration-300 ${isSidebarOpen ? "opacity-100" : "opacity-0 hidden"}`}>
+              History Activity
+            </span>
+          </Link>
+
+          {/* MENU 4: PENGATURAN */}
+          <Link href="/pengaturan" className={`flex items-center px-4 py-3 mx-3 rounded-lg font-medium transition-colors group ${pathname === '/pengaturan' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
+            <Cog6ToothIcon className={`w-6 h-6 flex-shrink-0 ml-1 ${pathname === '/pengaturan' ? 'text-white' : 'text-slate-400 group-hover:text-white'}`} />
             <span className={`ml-4 whitespace-nowrap transition-all duration-300 ${isSidebarOpen ? "opacity-100" : "opacity-0 hidden"}`}>
               Pengaturan
             </span>
@@ -60,9 +73,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <main className="flex-1 flex flex-col h-screen overflow-hidden min-w-0 transition-all duration-300">
         <header className="bg-white shadow-sm border-b px-8 py-4 flex justify-between items-center z-10 h-16">
           
-          {/* JUDUL HEADER DINAMIS: Berubah sesuai halaman */}
+          {/* JUDUL HEADER DINAMIS: Berubah otomatis sesuai halaman */}
           <h2 className="text-xl font-semibold text-gray-800">
-            {pathname === '/scan-log' ? 'Master Data: Scan Log' : 'Dashboard Utama'}
+            {pathname === '/scan-log' ? 'Master Data: Scan Log' : 
+             pathname === '/history-activity' ? 'Riwayat Aktivitas Sistem' : 
+             pathname === '/pengaturan' ? 'Pengaturan Sistem' : 
+             'Dashboard Utama'}
           </h2>
 
           <div className="flex items-center space-x-4">

@@ -71,7 +71,6 @@ export default function ScanLog() {
   const [filterPenerima, setFilterPenerima] = useState("Semua");
   const [filterStatus, setFilterStatus] = useState("Semua"); 
 
-  // STATE FILTER WAKTU PRO
   const [timeFilterMode, setTimeFilterMode] = useState("Semua"); 
   const [specificDate, setSpecificDate] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -107,7 +106,24 @@ export default function ScanLog() {
   const tableRef = useRef<HTMLTableElement>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null); 
 
-  // REF STATE UNTUK GLOBAL SCANNER SENSOR
+  // --- FUNGSI MATA-MATA HISTORY (BARU) ---
+  const recordGlobalHistory = (actionName: string, newData: ScanItem[]) => {
+    try {
+      const currentHistoryStr = localStorage.getItem("winteq_activity_log");
+      let historyLog = currentHistoryStr ? JSON.parse(currentHistoryStr) : [];
+      const newEntry = {
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        action: actionName,
+        dataSnapshot: newData
+      };
+      historyLog = [newEntry, ...historyLog].slice(0, 50); // Simpan max 50 log terbaru
+      localStorage.setItem("winteq_activity_log", JSON.stringify(historyLog));
+    } catch (e) {
+      console.error("Gagal simpan history", e);
+    }
+  };
+
   const statesRef = useRef({ scannedItems, activeSheet, sheets, scanCategory, scanCopro, coproList, scanPenerima });
   useEffect(() => {
     statesRef.current = { scannedItems, activeSheet, sheets, scanCategory, scanCopro, coproList, scanPenerima };
@@ -158,7 +174,6 @@ export default function ScanLog() {
           return col;
         });
 
-        // Mengunci posisi TITLE
         const titleIdx = restored.findIndex(c => c.name.toLowerCase() === 'title');
         const nomerDrawingIdx = restored.findIndex(c => c.id === 'barcode_id');
         if (titleIdx > -1 && nomerDrawingIdx > -1 && titleIdx !== nomerDrawingIdx + 1) {
@@ -273,7 +288,6 @@ export default function ScanLog() {
       if (filterStatus === "Belum Selesai") result = result.filter(item => item.waktu_dikembalikan === null);
     }
 
-    // PENCARIAN SAPU JAGAT (BISA NOMER TANPA STRIP & ISI CUSTOM KOLOM)
     if (searchQuery.trim() !== "") {
       const query = searchQuery.toLowerCase();
       const queryNoStrip = query.replace(/-/g, '');
@@ -293,7 +307,6 @@ export default function ScanLog() {
       });
     }
 
-    // FILTER WAKTU PRO
     if (timeFilterMode === "Spesifik" && specificDate) {
       const targetStart = new Date(specificDate + "T00:00:00").getTime();
       const targetEnd = new Date(specificDate + "T23:59:59.999").getTime();
@@ -311,14 +324,30 @@ export default function ScanLog() {
   const displayedItems = getFilteredItems(activeSheet);
 
   const saveHistory = () => { setPastStates((prev) => [...prev.slice(-19), {items: scannedItems, layouts: sheetLayouts}]); setFutureStates([]); };
-  const handleUndo = () => { if (pastStates.length === 0) return; const previousState = pastStates[pastStates.length - 1]; setPastStates((prev) => prev.slice(0, -1)); setFutureStates((prev) => [...prev, {items: scannedItems, layouts: sheetLayouts}]); setScannedItems(previousState.items); setSheetLayouts(previousState.layouts); };
-  const handleRedo = () => { if (futureStates.length === 0) return; const nextState = futureStates[futureStates.length - 1]; setFutureStates((prev) => prev.slice(0, -1)); setPastStates((prev) => [...prev, {items: scannedItems, layouts: sheetLayouts}]); setScannedItems(nextState.items); setSheetLayouts(nextState.layouts); };
+  const handleUndo = () => { 
+    if (pastStates.length === 0) return; 
+    const previousState = pastStates[pastStates.length - 1]; 
+    setPastStates((prev) => prev.slice(0, -1)); 
+    setFutureStates((prev) => [...prev, {items: scannedItems, layouts: sheetLayouts}]); 
+    setScannedItems(previousState.items); 
+    setSheetLayouts(previousState.layouts); 
+    recordGlobalHistory("Undo Aksi (Scan Log)", previousState.items);
+  };
+  const handleRedo = () => { 
+    if (futureStates.length === 0) return; 
+    const nextState = futureStates[futureStates.length - 1]; 
+    setFutureStates((prev) => prev.slice(0, -1)); 
+    setPastStates((prev) => [...prev, {items: scannedItems, layouts: sheetLayouts}]); 
+    setScannedItems(nextState.items); 
+    setSheetLayouts(nextState.layouts); 
+    recordGlobalHistory("Redo Aksi (Scan Log)", nextState.items);
+  };
 
   const internalExecuteBarcode = (barcodeStr: string) => {
     const { scannedItems: curItems, activeSheet: cActiveSheet, sheets: cSheets, scanCategory: cScanCat, scanCopro: cScanCopro, coproList: cCoproList, scanPenerima: cScanPen } = statesRef.current;
     
     const targetCategory = cActiveSheet === cSheets[0] ? cScanCat : cActiveSheet;
-    const existingItemIndex = curItems.findIndex(item => item.barcode_id === barcodeStr);
+    const existingItemIndex = curItems.findIndex(item => item.barcode_id === barcodeStr && item.kategori === targetCategory); // FIX DUPLIKAT PER KATEGORI
 
     if (existingItemIndex > -1) {
       const existingItem = curItems[existingItemIndex];
@@ -347,10 +376,13 @@ export default function ScanLog() {
       waktu_dikembalikan: null, timestamp_diterima: Date.now()
     };
 
-    setScannedItems(prev => [newItem, ...prev]);
+    setScannedItems(prev => {
+      const newData = [newItem, ...prev];
+      recordGlobalHistory(`Scan Masuk: ${barcodeStr}`, newData);
+      return newData;
+    });
   };
 
-  // --- SENSOR PENANGKAP BARCODE SUPER CANGGIH ---
   useEffect(() => {
     let buffer = "";
     let lastTime = 0;
@@ -365,7 +397,6 @@ export default function ScanLog() {
       const now = performance.now();
       const elapsed = now - lastTime;
 
-      // Jika jeda ketikan lama, ini manusia
       if (elapsed > 60) { 
         buffer = ""; 
         isScanning = false;
@@ -373,11 +404,9 @@ export default function ScanLog() {
 
       if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
         buffer += e.key;
-        // Jika karakter kedua dkk datang sangat cepat, kunci sebagai alat scanner
         if (buffer.length > 1 && elapsed < 40) {
           isScanning = true;
         }
-        // Cegah karakter masuk ke textarea/input jika sedang di-scan alat
         if (isScanning) {
           e.preventDefault();
           e.stopPropagation();
@@ -386,7 +415,6 @@ export default function ScanLog() {
 
       if (e.key === 'Enter') {
         if (buffer.length >= 4 && elapsed < 50) {
-          // FIX: Barcode berhasil ditangkap utuh walau sedang di dalam textarea!
           e.preventDefault();
           e.stopPropagation();
           const finalBarcode = buffer;
@@ -395,7 +423,7 @@ export default function ScanLog() {
           
           const activeEl = document.activeElement as HTMLElement;
           if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT')) {
-            activeEl.blur(); // Usir fokus otomatis
+            activeEl.blur(); 
           }
           
           internalExecuteBarcode(finalBarcode);
@@ -407,7 +435,6 @@ export default function ScanLog() {
 
       lastTime = now;
 
-      // Auto-focus Fast Scan manual input
       if (scanMode === 'direct' && directInputRef.current) {
         const activeTag = document.activeElement?.tagName;
         const isTypingInsideInput = activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT';
@@ -417,7 +444,6 @@ export default function ScanLog() {
       }
     };
     
-    // Gunakan capture phase agar bisa mencegat ketikan duluan
     window.addEventListener('keydown', handleGlobalKeyDown, true); 
     return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
   }, [pastStates, futureStates, anyModalOpen, scanMode]);
@@ -433,6 +459,7 @@ export default function ScanLog() {
   };
 
   const handleReturnCancel = () => { setReturnModal({ isOpen: false, pendingBarcode: "", existingItemId: "", targetCategory: "" }); setTimeout(() => directInputRef.current?.focus(), 100); };
+  
   const handleReturnConfirm = () => {
     saveHistory();
     setScannedItems(prev => {
@@ -441,6 +468,7 @@ export default function ScanLog() {
         updated[idx] = { ...updated[idx], waktu_dikembalikan: new Date().toLocaleString("id-ID") };
         const itemToMove = updated.splice(idx, 1)[0]; updated.unshift(itemToMove);
       }
+      recordGlobalHistory(`Mengembalikan Drawing: ${returnModal.pendingBarcode}`, updated);
       return updated;
     });
     setAlertModal({ isOpen: true, title: "Drawing Dikembalikan!", message: `Drawing ${returnModal.pendingBarcode} berhasil dicatat sebagai SUDAH DIKEMBALIKAN.` });
@@ -448,6 +476,7 @@ export default function ScanLog() {
   };
 
   const handleDuplicateCancel = () => { setDuplicateModal({ isOpen: false, pendingBarcode: "", targetCategory: "" }); setTimeout(() => directInputRef.current?.focus(), 100); };
+  
   const handleDuplicateReplace = () => {
     saveHistory();
     const pendingTrimmed = duplicateModal.pendingBarcode.trim();
@@ -461,8 +490,10 @@ export default function ScanLog() {
     };
     
     setScannedItems(prev => {
-      const filtered = prev.filter(item => item.barcode_id !== pendingTrimmed);
-      return [newItem, ...filtered];
+      const filtered = prev.filter(item => item.barcode_id !== pendingTrimmed || item.kategori !== duplicateModal.targetCategory);
+      const newData = [newItem, ...filtered];
+      recordGlobalHistory(`Menimpa Barcode Duplikat: ${pendingTrimmed}`, newData);
+      return newData;
     });
     handleDuplicateCancel();
   };
@@ -479,7 +510,11 @@ export default function ScanLog() {
       kategori: duplicateModal.targetCategory, waktu_diterima: new Date().toLocaleString("id-ID"), waktu_dikembalikan: null, timestamp_diterima: Date.now()
     };
     
-    setScannedItems(prev => [newItem, ...prev]);
+    setScannedItems(prev => {
+      const newData = [newItem, ...prev];
+      recordGlobalHistory(`Menambahkan Barcode Duplikat: ${pendingTrimmed}`, newData);
+      return newData;
+    });
     handleDuplicateCancel();
   };
 
@@ -498,17 +533,29 @@ export default function ScanLog() {
         saveHistory(); 
         if (listModal.type === 'copro') {
           setCoproList(coproList.map(c => c === listModal.oldName ? val : c)); setScanCopro(val);
-          setScannedItems(prev => prev.map(i => i.copro === listModal.oldName ? { ...i, copro: val } : i));
+          setScannedItems(prev => {
+            const newData = prev.map(i => i.copro === listModal.oldName ? { ...i, copro: val } : i);
+            recordGlobalHistory(`Ubah Copro ${listModal.oldName} ke ${val}`, newData);
+            return newData;
+          });
         } else {
           setPenerimaList(penerimaList.map(p => p === listModal.oldName ? val : p)); setScanPenerima(val);
-          setScannedItems(prev => prev.map(i => i.nama_penerima === listModal.oldName ? { ...i, nama_penerima: val } : i));
+          setScannedItems(prev => {
+            const newData = prev.map(i => i.nama_penerima === listModal.oldName ? { ...i, nama_penerima: val } : i);
+            recordGlobalHistory(`Ubah Penerima ${listModal.oldName} ke ${val}`, newData);
+            return newData;
+          });
         }
       }
     }
     
     if (listModal.mode === 'add' && listModal.type === 'penerima' && pendingPenerimaItemId) {
       saveHistory();
-      setScannedItems(prev => prev.map(item => item.id === pendingPenerimaItemId ? { ...item, nama_penerima: listModal.newName.trim() } : item));
+      setScannedItems(prev => {
+        const newData = prev.map(item => item.id === pendingPenerimaItemId ? { ...item, nama_penerima: listModal.newName.trim() } : item);
+        recordGlobalHistory(`Tambah Penerima via Dropdown`, newData);
+        return newData;
+      });
     }
     
     setListModal({ ...listModal, isOpen: false }); setPendingPenerimaItemId(null); setTimeout(() => directInputRef.current?.focus(), 100);
@@ -521,33 +568,41 @@ export default function ScanLog() {
       return;
     }
     saveHistory();
-    setScannedItems(prev => prev.map(item => item.id === id ? { ...item, nama_penerima: newPenerima } : item));
+    setScannedItems(prev => {
+      const newData = prev.map(item => item.id === id ? { ...item, nama_penerima: newPenerima } : item);
+      recordGlobalHistory(`Ganti Penerima ke ${newPenerima}`, newData);
+      return newData;
+    });
   };
 
   const handleCategoryChange = (itemId: string, newCategory: string) => {
     saveHistory();
-    setScannedItems(prev => prev.map(item => {
-      if (item.id === itemId) {
-        const oldCategory = item.kategori;
-        if (oldCategory === newCategory) return item;
+    setScannedItems(prev => {
+      const newData = prev.map(item => {
+        if (item.id === itemId) {
+          const oldCategory = item.kategori;
+          if (oldCategory === newCategory) return item;
 
-        const oldLayout = sheetLayouts[oldCategory] || [];
-        const newLayout = sheetLayouts[newCategory] || [];
-        const newCustomData = { ...(item.custom_data || {}) };
+          const oldLayout = sheetLayouts[oldCategory] || [];
+          const newLayout = sheetLayouts[newCategory] || [];
+          const newCustomData = { ...(item.custom_data || {}) };
 
-        oldLayout.forEach(oldCol => {
-          if (oldCol.type === 'custom' && newCustomData[oldCol.id] !== undefined) {
-            const matchingNewCol = newLayout.find(c => c.type === 'custom' && c.name.toLowerCase() === oldCol.name.toLowerCase());
-            if (matchingNewCol) {
-              newCustomData[matchingNewCol.id] = newCustomData[oldCol.id];
+          oldLayout.forEach(oldCol => {
+            if (oldCol.type === 'custom' && newCustomData[oldCol.id] !== undefined) {
+              const matchingNewCol = newLayout.find(c => c.type === 'custom' && c.name.toLowerCase() === oldCol.name.toLowerCase());
+              if (matchingNewCol) {
+                newCustomData[matchingNewCol.id] = newCustomData[oldCol.id];
+              }
             }
-          }
-        });
+          });
 
-        return { ...item, kategori: newCategory, custom_data: newCustomData, nama_penerima: newCategory === sheets[1] ? "" : item.nama_penerima };
-      }
-      return item;
-    }));
+          return { ...item, kategori: newCategory, custom_data: newCustomData, nama_penerima: newCategory === sheets[1] ? "" : item.nama_penerima };
+        }
+        return item;
+      });
+      recordGlobalHistory(`Ubah Kategori Data`, newData);
+      return newData;
+    });
   };
 
   const getGridDataString = () => {
@@ -605,6 +660,7 @@ export default function ScanLog() {
         }
         newItems[globalIdx] = updatedItem;
       }
+      recordGlobalHistory("Paste Data ke Tabel Excel", newItems);
       return newItems;
     });
   };
@@ -656,19 +712,27 @@ export default function ScanLog() {
 
   const handleCustomDataChange = (itemId: string, colName: string, value: string) => {
     saveHistory();
-    setScannedItems(prev => prev.map(item => {
-      if (item.id === itemId) {
-        const itemLayout = sheetLayouts[item.kategori] || [];
-        const actualCol = itemLayout.find(c => c.name.toLowerCase() === colName.toLowerCase());
-        if (actualCol) return { ...item, custom_data: { ...(item.custom_data || {}), [actualCol.id]: value } };
-      }
-      return item;
-    }));
+    setScannedItems(prev => {
+      const newData = prev.map(item => {
+        if (item.id === itemId) {
+          const itemLayout = sheetLayouts[item.kategori] || [];
+          const actualCol = itemLayout.find(c => c.name.toLowerCase() === colName.toLowerCase());
+          if (actualCol) return { ...item, custom_data: { ...(item.custom_data || {}), [actualCol.id]: value } };
+        }
+        return item;
+      });
+      recordGlobalHistory(`Ubah Data Custom Barcode`, newData);
+      return newData;
+    });
   };
 
   const handleCoproChange = (itemId: string, value: string) => { 
     saveHistory(); 
-    setScannedItems(prev => prev.map(item => item.id === itemId ? { ...item, copro: value } : item)); 
+    setScannedItems(prev => {
+      const newData = prev.map(item => item.id === itemId ? { ...item, copro: value } : item);
+      recordGlobalHistory(`Ubah Copro Data`, newData);
+      return newData;
+    }); 
     if (value && !coproList.includes(value)) {
       setCoproList(prev => [...prev, value]);
     }
@@ -683,8 +747,27 @@ export default function ScanLog() {
     const [moved] = layout.splice(fromIdx, 1); layout.splice(toIdx, 0, moved); setSheetLayouts({ ...sheetLayouts, [activeSheet]: layout }); setDraggedColId(null);
   };
 
-  const confirmDeleteRowAction = () => { if (deleteConfirm.itemId) { saveHistory(); setScannedItems((prev) => prev.filter((item) => item.id !== deleteConfirm.itemId)); } setDeleteConfirm({ isOpen: false, itemId: null, barcodeId: "" }); };
-  const confirmResetDataAction = () => { saveHistory(); if (activeSheet === sheets[0]) setScannedItems([]); else setScannedItems((prev) => prev.filter(item => item.kategori !== activeSheet)); setResetConfirmOpen(false); };
+  const confirmDeleteRowAction = () => { 
+    if (deleteConfirm.itemId) { 
+      saveHistory(); 
+      setScannedItems((prev) => {
+        const newData = prev.filter((item) => item.id !== deleteConfirm.itemId);
+        recordGlobalHistory(`Hapus Barcode: ${deleteConfirm.barcodeId}`, newData);
+        return newData;
+      }); 
+    } 
+    setDeleteConfirm({ isOpen: false, itemId: null, barcodeId: "" }); 
+  };
+  
+  const confirmResetDataAction = () => { 
+    saveHistory(); 
+    setScannedItems((prev) => {
+      const newData = activeSheet === sheets[0] ? [] : prev.filter(item => item.kategori !== activeSheet);
+      recordGlobalHistory(`Mengosongkan Tab ${activeSheet}`, newData);
+      return newData;
+    }); 
+    setResetConfirmOpen(false); 
+  };
 
   const handleRenameStart = (sheet: string) => { setEditSheetName(sheet); setEditingSheet(sheet); };
   const handleRenameSubmit = (oldName: string) => {
@@ -694,7 +777,12 @@ export default function ScanLog() {
     saveHistory();
     const newSheets = sheets.map(s => s === oldName ? newName : s); setSheets(newSheets);
     setSelectedExportSheets(prev => prev.map(s => s === oldName ? newName : s));
-    setScannedItems(scannedItems.map(i => i.kategori === oldName ? { ...i, kategori: newName } : i));
+    
+    setScannedItems(prev => {
+      const newData = prev.map(i => i.kategori === oldName ? { ...i, kategori: newName } : i);
+      recordGlobalHistory(`Ubah Nama Tab: ${oldName} ke ${newName}`, newData);
+      return newData;
+    });
     
     const newLayouts = { ...sheetLayouts };
     if(newLayouts[oldName]) { newLayouts[newName] = newLayouts[oldName]; delete newLayouts[oldName]; }

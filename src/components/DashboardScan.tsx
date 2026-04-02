@@ -50,13 +50,29 @@ export default function DashboardScan() {
   const [resetConfirmOpen, setResetConfirmOpen] = useState<boolean>(false);
   const [alertModal, setAlertModal] = useState({ isOpen: false, title: "", message: "" });
 
-  // STATE BARU UNTUK FITUR RESET TAMPILAN DASHBOARD
   const [lastResetTime, setLastResetTime] = useState<number>(0);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const latestItemsRef = useRef<ScanItem[]>([]);
 
   const anyModalOpen = duplicateModal.isOpen || returnModal.isOpen || deleteConfirm.isOpen || resetConfirmOpen || listModal.isOpen || alertModal.isOpen;
+
+  const recordGlobalHistory = (actionName: string, newData: ScanItem[]) => {
+    try {
+      const currentHistoryStr = localStorage.getItem("winteq_activity_log");
+      let historyLog = currentHistoryStr ? JSON.parse(currentHistoryStr) : [];
+      const newEntry = {
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        action: actionName,
+        dataSnapshot: newData
+      };
+      historyLog = [newEntry, ...historyLog].slice(0, 50); 
+      localStorage.setItem("winteq_activity_log", JSON.stringify(historyLog));
+    } catch (e) {
+      console.error("Gagal menyimpan riwayat", e);
+    }
+  };
 
   useEffect(() => {
     setIsMounted(true);
@@ -68,7 +84,7 @@ export default function DashboardScan() {
     const uiCategory = localStorage.getItem("winteq_dash_cat");
     const uiCopro = localStorage.getItem("winteq_dash_copro");
     const uiPenerima = localStorage.getItem("winteq_dash_penerima");
-    const savedResetTime = localStorage.getItem("winteq_dash_last_reset"); // Ambil waktu reset
+    const savedResetTime = localStorage.getItem("winteq_dash_last_reset"); 
 
     if (savedData) { const parsed = JSON.parse(savedData); setScannedItems(parsed); latestItemsRef.current = parsed; }
     if (savedCopro) setCoproList(JSON.parse(savedCopro));
@@ -118,6 +134,7 @@ export default function DashboardScan() {
     setFutureStates((prev) => [...prev, scannedItems]); 
     latestItemsRef.current = previousState; 
     setScannedItems(previousState); 
+    recordGlobalHistory("Undo Aksi (Dashboard)", previousState);
   };
   
   const handleRedo = () => { 
@@ -127,6 +144,7 @@ export default function DashboardScan() {
     setPastStates((prev) => [...prev, scannedItems]); 
     latestItemsRef.current = nextState; 
     setScannedItems(nextState); 
+    recordGlobalHistory("Redo Aksi (Dashboard)", nextState);
   };
 
   useEffect(() => {
@@ -142,7 +160,6 @@ export default function DashboardScan() {
     if (barcodeData.trim() === "" || anyModalOpen) return;
     const currentBarcode = barcodeData.trim();
     
-    // PERBAIKAN: Hanya cek duplikat di kategori yang SAMA
     const existingItemIndex = latestItemsRef.current.findIndex(item => item.barcode_id === currentBarcode && item.kategori === selectedCategory);
 
     if (existingItemIndex > -1) {
@@ -173,6 +190,7 @@ export default function DashboardScan() {
     
     const newData = [newItem, ...latestItemsRef.current];
     latestItemsRef.current = newData; setScannedItems(newData); setBarcodeData(""); inputRef.current?.focus(); 
+    recordGlobalHistory(`Scan Masuk: ${currentBarcode}`, newData);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => { if (e.key === "Enter") e.preventDefault(); };
@@ -183,17 +201,18 @@ export default function DashboardScan() {
       saveHistory(); 
       const newData = latestItemsRef.current.filter((item) => item.id !== deleteConfirm.itemId); 
       latestItemsRef.current = newData; setScannedItems(newData); 
+      recordGlobalHistory(`Hapus Barcode: ${deleteConfirm.barcodeId}`, newData);
     } 
     setDeleteConfirm({ isOpen: false, itemId: null, barcodeId: "" }); 
   };
   
-  // PERBAIKAN: Reset sekarang hanya membersihkan tampilan di dashboard!
   const confirmResetDataAction = () => { 
     const now = Date.now();
     localStorage.setItem("winteq_dash_last_reset", now.toString());
-    setLastResetTime(now); // Update state batas waktu
+    setLastResetTime(now); 
     setResetConfirmOpen(false); 
     setAlertModal({ isOpen: true, title: "Tampilan Direset", message: "Tampilan tabel di Dashboard berhasil dibersihkan. Semua data tetap tersimpan aman di halaman Scan Log." });
+    recordGlobalHistory("Membersihkan Tampilan Dashboard", latestItemsRef.current);
   };
   
   const handleListAction = () => {
@@ -212,9 +231,11 @@ export default function DashboardScan() {
         if (listModal.type === 'copro') {
           setCoproList(coproList.map(c => c === listModal.oldName ? val : c)); setSelectedCopro(val);
           const newData = latestItemsRef.current.map(i => i.copro === listModal.oldName ? { ...i, copro: val } : i); latestItemsRef.current = newData; setScannedItems(newData);
+          recordGlobalHistory(`Ubah Copro: ${listModal.oldName} -> ${val}`, newData);
         } else {
           setPenerimaList(penerimaList.map(p => p === listModal.oldName ? val : p)); setSelectedPenerima(val);
           const newData = latestItemsRef.current.map(i => i.nama_penerima === listModal.oldName ? { ...i, nama_penerima: val } : i); latestItemsRef.current = newData; setScannedItems(newData);
+          recordGlobalHistory(`Ubah Penerima: ${listModal.oldName} -> ${val}`, newData);
         }
       }
     }
@@ -230,6 +251,7 @@ export default function DashboardScan() {
       updatedData[idx] = { ...updatedData[idx], waktu_dikembalikan: new Date().toLocaleString("id-ID") };
       const itemToMove = updatedData.splice(idx, 1)[0]; updatedData.unshift(itemToMove);
       latestItemsRef.current = updatedData; setScannedItems(updatedData);
+      recordGlobalHistory(`Pengembalian Drawing: ${returnModal.pendingBarcode}`, updatedData);
       setAlertModal({ isOpen: true, title: "Drawing Dikembalikan!", message: `Drawing ${updatedData[0].barcode_id} berhasil dicatat sebagai SUDAH DIKEMBALIKAN.` });
     }
     handleReturnCancel();
@@ -247,7 +269,9 @@ export default function DashboardScan() {
       kategori: selectedCategory, waktu_diterima: new Date().toLocaleString("id-ID"), waktu_dikembalikan: null, timestamp_diterima: Date.now()
     };
     const filtered = latestItemsRef.current.filter(item => item.barcode_id !== pendingTrimmed || item.kategori !== selectedCategory);
-    latestItemsRef.current = [newItem, ...filtered]; setScannedItems(latestItemsRef.current);
+    const newData = [newItem, ...filtered];
+    latestItemsRef.current = newData; setScannedItems(newData);
+    recordGlobalHistory(`Menimpa Barcode Duplikat: ${pendingTrimmed}`, newData);
     handleDuplicateCancel();
   };
   
@@ -261,11 +285,12 @@ export default function DashboardScan() {
       id: crypto.randomUUID(), barcode_id: pendingTrimmed, copro: finalCopro, nama_penerima: selectedCategory === tabs[1] ? "" : selectedPenerima,
       kategori: selectedCategory, waktu_diterima: new Date().toLocaleString("id-ID"), waktu_dikembalikan: null, timestamp_diterima: Date.now()
     };
-    latestItemsRef.current = [newItem, ...latestItemsRef.current]; setScannedItems(latestItemsRef.current);
+    const newData = [newItem, ...latestItemsRef.current];
+    latestItemsRef.current = newData; setScannedItems(newData);
+    recordGlobalHistory(`Menambahkan Barcode Duplikat: ${pendingTrimmed}`, newData);
     handleDuplicateCancel();
   };
 
-  // PERBAIKAN: Hanya tampilkan data yang di-scan SETELAH waktu reset terakhir!
   const displayedItems = scannedItems.filter(item => item.kategori === selectedCategory && item.timestamp_diterima > lastResetTime).slice(0, 10);
 
   const exportToExcelWithAlert = () => {
@@ -290,15 +315,14 @@ export default function DashboardScan() {
 
   return (
     <>
-      <style>{`.thin-scrollbar::-webkit-scrollbar { width: 6px; } .thin-scrollbar::-webkit-scrollbar-track { background: transparent; } .thin-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; } .thin-scrollbar::-webkit-scrollbar-thumb:hover { background-color: #94a3b8; }`}</style>
+      <style>{`.thin-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; } .thin-scrollbar::-webkit-scrollbar-track { background: transparent; } .thin-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; } .thin-scrollbar::-webkit-scrollbar-thumb:hover { background-color: #94a3b8; }`}</style>
 
       <Modal isOpen={deleteConfirm.isOpen} title="Hapus Barcode?" type="danger" icon="trash" onClose={() => setDeleteConfirm({ isOpen: false, itemId: null, barcodeId: "" })} onConfirm={confirmDeleteRowAction} description={<>Yakin menghapus barcode <span className="font-semibold text-red-700">"{deleteConfirm.barcodeId}"</span>?</>}>
         <button onClick={() => setDeleteConfirm({ isOpen: false, itemId: null, barcodeId: "" })} className="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg">Batal (Esc)</button>
         <button onClick={confirmDeleteRowAction} className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg flex items-center"><TrashIcon className="w-4 h-4 mr-1.5" /> Hapus (Enter)</button>
       </Modal>
 
-      {/* Teks Reset Diubah agar customer paham fungsinya */}
-      <Modal isOpen={resetConfirmOpen} title="Reset Tampilan Dashboard" type="warning" icon="warning" onClose={() => setResetConfirmOpen(false)} onConfirm={confirmResetDataAction} description={<>Yakin ingin membersihkan tampilan <span className="font-semibold text-gray-800">{displayedItems.length}</span> log terbaru ini? (Data asli tetap aman di halaman Scan Log).</>}>
+      <Modal isOpen={resetConfirmOpen} title="Peringatan: Reset Tampilan" type="warning" icon="warning" onClose={() => setResetConfirmOpen(false)} onConfirm={confirmResetDataAction} description={<>Yakin ingin membersihkan tampilan <span className="font-semibold text-gray-800">{displayedItems.length}</span> log terbaru ini? (Data asli tetap aman di halaman Scan Log).</>}>
         <button onClick={() => setResetConfirmOpen(false)} className="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg">Batal (Esc)</button>
         <button onClick={confirmResetDataAction} className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg flex items-center"><ArrowPathIcon className="w-4 h-4 mr-1.5" /> Bersihkan Tampilan</button>
       </Modal>
@@ -353,19 +377,31 @@ export default function DashboardScan() {
             </div>
           </div>
           
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-5">
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-5 transition-all">
             <div className="flex items-center space-x-2 border-b border-gray-100 pb-3">
               <Cog6ToothIcon className="w-5 h-5 text-gray-500" />
               <label className="block text-sm font-bold text-gray-700 uppercase tracking-wider">Pengaturan Scan</label>
             </div>
+            
+            {/* PERBAIKAN 1: Tombol Kategori sejajar dan tidak tumpang tindih */}
             <div>
               <p className="text-xs font-semibold text-gray-500 mb-2 uppercase">1. Kategori Drawing</p>
-              <div className="flex bg-gray-100 p-1.5 rounded-lg">
-                {/* PERBAIKAN HOVER BIRU DI BUTTON KATEGORI */}
-                <button onClick={() => setSelectedCategory(tabs[1])} className={`flex-1 py-2.5 px-2 text-sm font-bold rounded-md transition-all ${selectedCategory === tabs[1] ? 'bg-white text-blue-700 shadow-sm ring-1 ring-black/5' : 'text-gray-500 hover:text-blue-600 hover:bg-blue-50'}`}>{tabs[1]}</button>
-                <button onClick={() => setSelectedCategory(tabs[2])} className={`flex-1 py-2.5 px-2 text-sm font-bold rounded-md transition-all ${selectedCategory === tabs[2] ? 'bg-white text-blue-700 shadow-sm ring-1 ring-black/5' : 'text-gray-500 hover:text-blue-600 hover:bg-blue-50'}`}>{tabs[2]}</button>
+              <div className="flex flex-col 2xl:flex-row bg-gray-100 p-1.5 rounded-lg gap-1.5 overflow-x-auto thin-scrollbar">
+                <button 
+                  onClick={() => setSelectedCategory(tabs[1])} 
+                  className={`flex-1 py-2 px-3 text-[10px] 2xl:text-xs font-bold rounded-md transition-all uppercase whitespace-nowrap shrink-0 ${selectedCategory === tabs[1] ? 'bg-blue-600 text-white shadow-md' : 'bg-transparent text-gray-500 hover:bg-blue-50 hover:text-blue-600'}`}
+                >
+                  {tabs[1]}
+                </button>
+                <button 
+                  onClick={() => setSelectedCategory(tabs[2])} 
+                  className={`flex-1 py-2 px-3 text-[10px] 2xl:text-xs font-bold rounded-md transition-all uppercase whitespace-nowrap shrink-0 ${selectedCategory === tabs[2] ? 'bg-blue-600 text-white shadow-md' : 'bg-transparent text-gray-500 hover:bg-blue-50 hover:text-blue-600'}`}
+                >
+                  {tabs[2]}
+                </button>
               </div>
             </div>
+
             <div>
               <p className="text-xs font-semibold text-gray-500 mb-2 uppercase">2. COPRO</p>
               <div className="flex space-x-2 relative">
@@ -392,50 +428,62 @@ export default function DashboardScan() {
                 <button onClick={() => setListModal({ isOpen: true, mode: 'add', type: 'copro', oldName: "", newName: "" })} className="bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 p-3 rounded-lg flex items-center justify-center shrink-0" title="Tambah Copro Baru"><PlusIcon className="w-5 h-5" /></button>
               </div>
             </div>
-            <div>
-              <p className="text-xs font-semibold text-gray-500 mb-2 uppercase">3. Nama Penerima</p>
-              <div className="flex space-x-2 relative">
-                <div className="relative flex-1" ref={penerimaRef}>
-                  <div className={`w-full p-3 border-2 border-gray-300 rounded-lg bg-white text-gray-700 text-sm flex justify-between items-center ${selectedCategory === tabs[1] ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'cursor-pointer'}`} onClick={() => { if (selectedCategory !== tabs[1]) setPenerimaDropdownOpen(!penerimaDropdownOpen); }}>
-                    <span>{selectedPenerima || "-- Biarkan Kosong --"}</span>
-                    <ChevronDownIcon className="w-4 h-4 text-gray-500" />
-                  </div>
-                  {penerimaDropdownOpen && selectedCategory !== tabs[1] && (
-                    <div className="absolute z-[100] top-full left-0 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-48 overflow-y-auto thin-scrollbar">
-                      <div className="px-4 py-2 hover:bg-gray-50 cursor-pointer text-sm text-gray-500 italic border-b border-gray-100" onClick={() => { setSelectedPenerima(""); setPenerimaDropdownOpen(false); }}>-- Biarkan Kosong --</div>
-                      {penerimaList.map(p => (
-                        <div key={p} className="flex justify-between items-center px-4 py-2 hover:bg-gray-50 cursor-pointer group" onClick={() => { setSelectedPenerima(p); setPenerimaDropdownOpen(false); }}>
-                          <span className="text-sm text-gray-700">{p}</span>
-                          <div className="flex space-x-1">
-                            <button onClick={(e) => { e.stopPropagation(); setListModal({ isOpen: true, mode: 'edit', type: 'penerima', oldName: p, newName: p }); setPenerimaDropdownOpen(false); }} className="text-blue-500 hover:bg-blue-100 p-1.5 rounded transition-colors" title="Edit"><PencilIcon className="w-4 h-4" /></button>
-                            <button onClick={(e) => { e.stopPropagation(); setListModal({ isOpen: true, mode: 'delete', type: 'penerima', oldName: p, newName: "" }); setPenerimaDropdownOpen(false); }} className="text-red-500 hover:bg-red-100 p-1.5 rounded transition-colors" title="Hapus"><TrashIcon className="w-4 h-4" /></button>
-                          </div>
-                        </div>
-                      ))}
+            
+            {/* PERBAIKAN 2: Sembunyikan bagian Nama Penerima jika Internal yang dipilih */}
+            {selectedCategory !== tabs[1] && (
+              <div>
+                <p className="text-xs font-semibold text-gray-500 mb-2 uppercase">3. Nama Penerima</p>
+                <div className="flex space-x-2 relative">
+                  <div className="relative flex-1" ref={penerimaRef}>
+                    <div className="w-full p-3 border-2 border-gray-300 rounded-lg bg-white text-gray-700 text-sm flex justify-between items-center cursor-pointer" onClick={() => setPenerimaDropdownOpen(!penerimaDropdownOpen)}>
+                      <span>{selectedPenerima || "-- Biarkan Kosong --"}</span>
+                      <ChevronDownIcon className="w-4 h-4 text-gray-500" />
                     </div>
-                  )}
+                    {penerimaDropdownOpen && (
+                      <div className="absolute z-[100] top-full left-0 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-48 overflow-y-auto thin-scrollbar">
+                        <div className="px-4 py-2 hover:bg-gray-50 cursor-pointer text-sm text-gray-500 italic border-b border-gray-100" onClick={() => { setSelectedPenerima(""); setPenerimaDropdownOpen(false); }}>-- Biarkan Kosong --</div>
+                        {penerimaList.map(p => (
+                          <div key={p} className="flex justify-between items-center px-4 py-2 hover:bg-gray-50 cursor-pointer group" onClick={() => { setSelectedPenerima(p); setPenerimaDropdownOpen(false); }}>
+                            <span className="text-sm text-gray-700">{p}</span>
+                            <div className="flex space-x-1">
+                              <button onClick={(e) => { e.stopPropagation(); setListModal({ isOpen: true, mode: 'edit', type: 'penerima', oldName: p, newName: p }); setPenerimaDropdownOpen(false); }} className="text-blue-500 hover:bg-blue-100 p-1.5 rounded transition-colors" title="Edit"><PencilIcon className="w-4 h-4" /></button>
+                              <button onClick={(e) => { e.stopPropagation(); setListModal({ isOpen: true, mode: 'delete', type: 'penerima', oldName: p, newName: "" }); setPenerimaDropdownOpen(false); }} className="text-red-500 hover:bg-red-100 p-1.5 rounded transition-colors" title="Hapus"><TrashIcon className="w-4 h-4" /></button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={() => setListModal({ isOpen: true, mode: 'add', type: 'penerima', oldName: "", newName: "" })} className="bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 p-3 rounded-lg flex items-center justify-center shrink-0" title="Tambah Penerima Baru"><PlusIcon className="w-5 h-5" /></button>
                 </div>
-                <button onClick={() => setListModal({ isOpen: true, mode: 'add', type: 'penerima', oldName: "", newName: "" })} disabled={selectedCategory === tabs[1]} className="bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 p-3 rounded-lg flex items-center justify-center shrink-0 disabled:opacity-50 disabled:cursor-not-allowed" title="Tambah Penerima Baru"><PlusIcon className="w-5 h-5" /></button>
               </div>
-              {selectedCategory === tabs[1] && <p className="text-xs text-red-500 mt-1 italic">*Internal tidak memerlukan nama penerima.</p>}
-            </div>
+            )}
+            
           </div>
         </div>
         
         <div className="w-full xl:w-2/3 flex flex-col bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden z-0">
-          <div className="p-4 sm:p-5 border-b border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center bg-gray-50/50 gap-4 sm:gap-0 shrink-0">
-            <h3 className="font-bold text-gray-800">10 Log Terbaru: <span className="text-blue-700 font-extrabold">{selectedCategory}</span></h3>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex bg-gray-100 rounded-lg p-1 border border-gray-200">
-                <button onClick={handleUndo} disabled={pastStates.length === 0} className={`p-1.5 rounded-md flex items-center transition-all ${pastStates.length > 0 ? "bg-white text-gray-700 shadow-sm hover:text-blue-600" : "text-gray-400 cursor-not-allowed opacity-60"}`}><ArrowUturnLeftIcon className="w-4 h-4" /></button>
-                <button onClick={handleRedo} disabled={futureStates.length === 0} className={`p-1.5 rounded-md flex items-center transition-all ml-1 ${futureStates.length > 0 ? "bg-white text-gray-700 shadow-sm hover:text-blue-600" : "text-gray-400 cursor-not-allowed opacity-60"}`}><ArrowUturnRightIcon className="w-4 h-4" /></button>
+          {/* PERBAIKAN 3: Mencegah tombol Bersihkan Tampilan terdorong ke bawah */}
+          <div className="p-3 sm:p-4 border-b border-gray-100 flex flex-col 2xl:flex-row justify-between items-start 2xl:items-center bg-gray-50/50 gap-3 2xl:gap-0 shrink-0">
+            <h3 className="font-bold text-gray-800 uppercase text-sm truncate w-full 2xl:w-auto pr-2">
+              10 Log Terbaru: <span className="text-blue-700 font-extrabold">{selectedCategory}</span>
+            </h3>
+            <div className="flex items-center gap-2 flex-nowrap shrink-0 overflow-x-auto w-full 2xl:w-auto thin-scrollbar pb-1 2xl:pb-0">
+              <div className="flex bg-gray-100 rounded-md p-1 border border-gray-200 shrink-0">
+                <button onClick={handleUndo} disabled={pastStates.length === 0} className={`p-1.5 rounded flex items-center transition-all ${pastStates.length > 0 ? "bg-white text-gray-700 shadow-sm hover:text-blue-600" : "text-gray-400 cursor-not-allowed opacity-60"}`}><ArrowUturnLeftIcon className="w-4 h-4" /></button>
+                <button onClick={handleRedo} disabled={futureStates.length === 0} className={`p-1.5 rounded flex items-center transition-all ml-1 ${futureStates.length > 0 ? "bg-white text-gray-700 shadow-sm hover:text-blue-600" : "text-gray-400 cursor-not-allowed opacity-60"}`}><ArrowUturnRightIcon className="w-4 h-4" /></button>
               </div>
-              <button onClick={exportToExcelWithAlert} className="bg-green-600 hover:bg-green-700 text-white text-sm font-medium py-2 px-4 rounded-lg shadow-sm flex items-center">
+              <button onClick={exportToExcelWithAlert} className="bg-green-600 hover:bg-green-700 text-white text-xs font-bold py-1.5 px-3 rounded-md shadow-sm flex items-center shrink-0 whitespace-nowrap">
                 <DocumentArrowDownIcon className="w-4 h-4 mr-1.5" /> Unduh Excel
               </button>
-              {displayedItems.length > 0 && <button onClick={() => setResetConfirmOpen(true)} className="bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium py-2 px-4 rounded-lg border border-red-200">Bersihkan Tampilan</button>}
+              {displayedItems.length > 0 && (
+                <button onClick={() => setResetConfirmOpen(true)} className="bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold py-1.5 px-3 rounded-md border border-red-200 shrink-0 whitespace-nowrap">
+                  Bersihkan Tampilan
+                </button>
+              )}
             </div>
           </div>
+          
           <div className="flex-1 overflow-auto bg-white">
             <table className="w-full text-left border-collapse min-w-[600px]">
               <thead className="sticky top-0 bg-gray-50 shadow-sm z-10 border-b border-gray-200">
@@ -443,12 +491,17 @@ export default function DashboardScan() {
                   <th className="p-4 font-bold text-center w-12">No</th>
                   <th className="p-4 font-bold">Nomer Drawing</th>
                   <th className="p-4 font-bold text-center">Status</th>
-                  <th className="p-4 font-bold text-center w-24">Aksi</th>
+                  {/* PERBAIKAN 4: Teks AKSI diganti ikon tong sampah */}
+                  <th className="p-4 font-bold text-center w-24">
+                    <div className="flex justify-center">
+                      <TrashIcon className="w-5 h-5 text-gray-500" title="Aksi" />
+                    </div>
+                  </th>
                 </tr>
               </thead>
               <tbody className="text-sm">
                 {displayedItems.length === 0 ? (
-                  <tr><td colSpan={4} className="p-16 text-center text-gray-400">Belum ada data pindaian di kategori ini.</td></tr>
+                  <tr><td colSpan={4} className="p-16 text-center text-gray-400">Belum ada data pindaian di kategori ini sejak dibersihkan.</td></tr>
                 ) : (
                   displayedItems.map((item, index) => {
                     const isReturned = item.waktu_dikembalikan !== null;
@@ -457,7 +510,7 @@ export default function DashboardScan() {
                         <td className="p-4 text-gray-600 text-center">{index + 1}</td>
                         <td className="p-4">
                           <div className="font-bold text-gray-900">{item.barcode_id}</div>
-                          <div className="text-xs text-gray-500 mt-1">Copro: {item.copro || "-"} | {item.kategori}</div>
+                          <div className="text-xs text-gray-500 mt-1">Copro: {item.copro || "-"} | <span className="uppercase">{item.kategori}</span></div>
                         </td>
                         <td className="p-4 text-center">
                           {item.kategori === tabs[1] ? (
