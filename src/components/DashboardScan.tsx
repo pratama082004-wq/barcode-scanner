@@ -50,6 +50,9 @@ export default function DashboardScan() {
   const [resetConfirmOpen, setResetConfirmOpen] = useState<boolean>(false);
   const [alertModal, setAlertModal] = useState({ isOpen: false, title: "", message: "" });
 
+  // STATE BARU UNTUK FITUR RESET TAMPILAN DASHBOARD
+  const [lastResetTime, setLastResetTime] = useState<number>(0);
+
   const inputRef = useRef<HTMLInputElement>(null);
   const latestItemsRef = useRef<ScanItem[]>([]);
 
@@ -65,10 +68,12 @@ export default function DashboardScan() {
     const uiCategory = localStorage.getItem("winteq_dash_cat");
     const uiCopro = localStorage.getItem("winteq_dash_copro");
     const uiPenerima = localStorage.getItem("winteq_dash_penerima");
+    const savedResetTime = localStorage.getItem("winteq_dash_last_reset"); // Ambil waktu reset
 
     if (savedData) { const parsed = JSON.parse(savedData); setScannedItems(parsed); latestItemsRef.current = parsed; }
     if (savedCopro) setCoproList(JSON.parse(savedCopro));
     if (savedPenerima) setPenerimaList(JSON.parse(savedPenerima));
+    if (savedResetTime) setLastResetTime(Number(savedResetTime));
 
     if (savedTabs) {
       const parsedTabs = JSON.parse(savedTabs); setTabs(parsedTabs);
@@ -101,7 +106,6 @@ export default function DashboardScan() {
     document.addEventListener("mousedown", handleClickOutside); return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // --- PERBAIKAN: LOGIKA UNDO REDO DISAMAKAN 100% DENGAN SCAN LOG ---
   const saveHistory = () => { 
     setPastStates((prev) => [...prev.slice(-19), scannedItems]); 
     setFutureStates([]); 
@@ -112,7 +116,7 @@ export default function DashboardScan() {
     const previousState = pastStates[pastStates.length - 1]; 
     setPastStates((prev) => prev.slice(0, -1)); 
     setFutureStates((prev) => [...prev, scannedItems]); 
-    latestItemsRef.current = previousState; // Sinkronisasi paksa ke Ref
+    latestItemsRef.current = previousState; 
     setScannedItems(previousState); 
   };
   
@@ -121,7 +125,7 @@ export default function DashboardScan() {
     const nextState = futureStates[futureStates.length - 1]; 
     setFutureStates((prev) => prev.slice(0, -1)); 
     setPastStates((prev) => [...prev, scannedItems]); 
-    latestItemsRef.current = nextState; // Sinkronisasi paksa ke Ref
+    latestItemsRef.current = nextState; 
     setScannedItems(nextState); 
   };
 
@@ -132,12 +136,14 @@ export default function DashboardScan() {
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); handleRedo(); }
     };
     window.addEventListener('keydown', handleGlobalKeyDown); return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [pastStates, futureStates, scannedItems, anyModalOpen]); // Tambahan `scannedItems` agar Undo Keyboard selalu dapat data segar!
+  }, [pastStates, futureStates, scannedItems, anyModalOpen]);
 
   const submitBarcodeData = () => {
     if (barcodeData.trim() === "" || anyModalOpen) return;
     const currentBarcode = barcodeData.trim();
-    const existingItemIndex = latestItemsRef.current.findIndex(item => item.barcode_id === currentBarcode);
+    
+    // PERBAIKAN: Hanya cek duplikat di kategori yang SAMA
+    const existingItemIndex = latestItemsRef.current.findIndex(item => item.barcode_id === currentBarcode && item.kategori === selectedCategory);
 
     if (existingItemIndex > -1) {
       const existingItem = latestItemsRef.current[existingItemIndex];
@@ -181,11 +187,13 @@ export default function DashboardScan() {
     setDeleteConfirm({ isOpen: false, itemId: null, barcodeId: "" }); 
   };
   
+  // PERBAIKAN: Reset sekarang hanya membersihkan tampilan di dashboard!
   const confirmResetDataAction = () => { 
-    saveHistory(); 
-    latestItemsRef.current = []; 
-    setScannedItems([]); 
+    const now = Date.now();
+    localStorage.setItem("winteq_dash_last_reset", now.toString());
+    setLastResetTime(now); // Update state batas waktu
     setResetConfirmOpen(false); 
+    setAlertModal({ isOpen: true, title: "Tampilan Direset", message: "Tampilan tabel di Dashboard berhasil dibersihkan. Semua data tetap tersimpan aman di halaman Scan Log." });
   };
   
   const handleListAction = () => {
@@ -238,7 +246,7 @@ export default function DashboardScan() {
       id: crypto.randomUUID(), barcode_id: pendingTrimmed, copro: finalCopro, nama_penerima: selectedCategory === tabs[1] ? "" : selectedPenerima,
       kategori: selectedCategory, waktu_diterima: new Date().toLocaleString("id-ID"), waktu_dikembalikan: null, timestamp_diterima: Date.now()
     };
-    const filtered = latestItemsRef.current.filter(item => item.barcode_id !== pendingTrimmed);
+    const filtered = latestItemsRef.current.filter(item => item.barcode_id !== pendingTrimmed || item.kategori !== selectedCategory);
     latestItemsRef.current = [newItem, ...filtered]; setScannedItems(latestItemsRef.current);
     handleDuplicateCancel();
   };
@@ -257,7 +265,8 @@ export default function DashboardScan() {
     handleDuplicateCancel();
   };
 
-  const displayedItems = scannedItems.filter(item => item.kategori === selectedCategory).slice(0, 7);
+  // PERBAIKAN: Hanya tampilkan data yang di-scan SETELAH waktu reset terakhir!
+  const displayedItems = scannedItems.filter(item => item.kategori === selectedCategory && item.timestamp_diterima > lastResetTime).slice(0, 10);
 
   const exportToExcelWithAlert = () => {
     if (displayedItems.length === 0) return setAlertModal({ isOpen: true, title: "Data Kosong", message: "Belum ada data pindaian di kategori ini yang bisa diunduh." });
@@ -288,9 +297,10 @@ export default function DashboardScan() {
         <button onClick={confirmDeleteRowAction} className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg flex items-center"><TrashIcon className="w-4 h-4 mr-1.5" /> Hapus (Enter)</button>
       </Modal>
 
-      <Modal isOpen={resetConfirmOpen} title="Peringatan: Reset Data Utuh" type="severe" icon="reset" onClose={() => setResetConfirmOpen(false)} onConfirm={confirmResetDataAction} description={<>Yakin 100% menghapus <span className="font-semibold text-gray-800">SEMUA</span> {scannedItems.length} data drawing?</>}>
+      {/* Teks Reset Diubah agar customer paham fungsinya */}
+      <Modal isOpen={resetConfirmOpen} title="Reset Tampilan Dashboard" type="warning" icon="warning" onClose={() => setResetConfirmOpen(false)} onConfirm={confirmResetDataAction} description={<>Yakin ingin membersihkan tampilan <span className="font-semibold text-gray-800">{displayedItems.length}</span> log terbaru ini? (Data asli tetap aman di halaman Scan Log).</>}>
         <button onClick={() => setResetConfirmOpen(false)} className="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg">Batal (Esc)</button>
-        <button onClick={confirmResetDataAction} className="px-5 py-2 bg-red-700 hover:bg-red-800 text-white text-sm font-medium rounded-lg flex items-center"><ArrowPathIcon className="w-4 h-4 mr-1.5" /> Reset SEMUA Data</button>
+        <button onClick={confirmResetDataAction} className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg flex items-center"><ArrowPathIcon className="w-4 h-4 mr-1.5" /> Bersihkan Tampilan</button>
       </Modal>
 
       <Modal isOpen={alertModal.isOpen} title={alertModal.title} type="warning" icon="warning" onClose={() => setAlertModal({ ...alertModal, isOpen: false })} onConfirm={() => setAlertModal({ ...alertModal, isOpen: false })} description={alertModal.message}>
@@ -302,7 +312,7 @@ export default function DashboardScan() {
         <button onClick={handleReturnConfirm} className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white text-sm font-medium rounded-lg flex items-center gap-1.5"><CheckCircleIcon className="w-4 h-4"/> Drawing Dikembalikan</button>
       </Modal>
 
-      <Modal isOpen={duplicateModal.isOpen} title="Barcode Sudah Ada!" type="warning" icon="warning" onClose={handleDuplicateCancel} onConfirm={handleDuplicateCancel} description={<>Drawing <span className="font-semibold text-blue-600">"{duplicateModal.pendingBarcode}"</span> sudah tercatat di sistem secara penuh. Apa yang ingin kamu lakukan?</>}>
+      <Modal isOpen={duplicateModal.isOpen} title="Barcode Sudah Ada!" type="warning" icon="warning" onClose={handleDuplicateCancel} onConfirm={handleDuplicateCancel} description={<>Drawing <span className="font-semibold text-blue-600">"{duplicateModal.pendingBarcode}"</span> sudah tercatat di sistem untuk kategori ini. Apa yang ingin kamu lakukan?</>}>
         <button onClick={handleDuplicateCancel} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg">Batal (Esc)</button>
         <button onClick={handleDuplicateReplace} className="px-4 py-2 bg-red-50 border border-red-200 text-red-700 hover:bg-red-100 text-sm font-medium rounded-lg flex items-center gap-1.5"><ExclamationTriangleIcon className="w-4 h-4"/> Timpa Data Lama</button>
         <button onClick={handleDuplicateAddAnyway} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg flex items-center gap-1.5"><PlusIcon className="w-4 h-4"/> Tetap Tambahkan (Dobel)</button>
@@ -351,8 +361,9 @@ export default function DashboardScan() {
             <div>
               <p className="text-xs font-semibold text-gray-500 mb-2 uppercase">1. Kategori Drawing</p>
               <div className="flex bg-gray-100 p-1.5 rounded-lg">
-                <button onClick={() => setSelectedCategory(tabs[1])} className={`flex-1 py-2.5 px-2 text-sm font-bold rounded-md transition-all ${selectedCategory === tabs[1] ? 'bg-white text-blue-700 shadow-sm ring-1 ring-black/5' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}>{tabs[1]}</button>
-                <button onClick={() => setSelectedCategory(tabs[2])} className={`flex-1 py-2.5 px-2 text-sm font-bold rounded-md transition-all ${selectedCategory === tabs[2] ? 'bg-white text-blue-700 shadow-sm ring-1 ring-black/5' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}>{tabs[2]}</button>
+                {/* PERBAIKAN HOVER BIRU DI BUTTON KATEGORI */}
+                <button onClick={() => setSelectedCategory(tabs[1])} className={`flex-1 py-2.5 px-2 text-sm font-bold rounded-md transition-all ${selectedCategory === tabs[1] ? 'bg-white text-blue-700 shadow-sm ring-1 ring-black/5' : 'text-gray-500 hover:text-blue-600 hover:bg-blue-50'}`}>{tabs[1]}</button>
+                <button onClick={() => setSelectedCategory(tabs[2])} className={`flex-1 py-2.5 px-2 text-sm font-bold rounded-md transition-all ${selectedCategory === tabs[2] ? 'bg-white text-blue-700 shadow-sm ring-1 ring-black/5' : 'text-gray-500 hover:text-blue-600 hover:bg-blue-50'}`}>{tabs[2]}</button>
               </div>
             </div>
             <div>
@@ -422,7 +433,7 @@ export default function DashboardScan() {
               <button onClick={exportToExcelWithAlert} className="bg-green-600 hover:bg-green-700 text-white text-sm font-medium py-2 px-4 rounded-lg shadow-sm flex items-center">
                 <DocumentArrowDownIcon className="w-4 h-4 mr-1.5" /> Unduh Excel
               </button>
-              {scannedItems.length > 0 && <button onClick={() => setResetConfirmOpen(true)} className="bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium py-2 px-4 rounded-lg border border-red-200">Reset Data</button>}
+              {displayedItems.length > 0 && <button onClick={() => setResetConfirmOpen(true)} className="bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium py-2 px-4 rounded-lg border border-red-200">Bersihkan Tampilan</button>}
             </div>
           </div>
           <div className="flex-1 overflow-auto bg-white">
