@@ -1,0 +1,46 @@
+// File: prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// 1. Tabel Utama untuk Data Scan
+model ScanLog {
+  id                 String   @id @default(uuid())
+  workspace          String   @default("Main Log") // <--- TAMBAHAN BARU: Ini masuk ke buku catatan mana?
+  barcode_id         String
+  copro              String
+  nama_penerima      String
+  kategori           String
+  waktu_diterima     String
+  waktu_dikembalikan String?  
+  timestamp_diterima BigInt
+  custom_data        Json?    
+  
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+// 2. Tabel untuk History Activity
+model ActivityHistory {
+  id             String   @id @default(uuid())
+  workspace      String   @default("Main Log") // <--- TAMBAHAN BARU: Riwayat ini punya buku catatan mana?
+  timestamp      BigInt
+  action         String
+  dataSnapshot   Json     
+  layoutSnapshot Json?    
+  
+  createdAt      DateTime @default(now())
+}
+
+// 3. Tabel Pengaturan Sistem
+model SystemSetting {
+  key       String   @id      // Nanti kita simpan daftar "Buku Catatan" di sini
+  value     Json
+  updatedAt DateTime @updatedAt
+}

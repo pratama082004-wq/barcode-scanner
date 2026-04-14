@@ -1,98 +1,194 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { usePathname } from "next/navigation"; 
-import { 
-  ClipboardDocumentCheckIcon, 
-  Cog6ToothIcon, 
-  Bars3Icon, 
-  XMarkIcon, 
-  TableCellsIcon,
-  ClockIcon // Import icon jam untuk History
-} from "@heroicons/react/24/outline";
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation"; 
+import { 
+  QrCodeIcon, TableCellsIcon, ClockIcon, Cog6ToothIcon, 
+  PlusIcon, FolderIcon, ChevronDownIcon, XMarkIcon, PencilIcon, TrashIcon
+} from "@heroicons/react/24/outline";
+
+import { getWorkspaces, addWorkspace, renameWorkspace, deleteWorkspace, updateWorkspaceOrder } from "./../actions/db";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true); 
-  const pathname = usePathname(); // Membaca URL saat ini
+  const pathname = usePathname();
+  const router = useRouter(); 
+  const [workspaces, setWorkspaces] = useState<string[]>(["Main Log"]);
+  const [activeWorkspace, setActiveWorkspace] = useState("Main Log");
+  
+  // LAZY INITIALIZATION: Langsung baca memori sebelum render, biar gak kedip kebuka!
+  const [isScanLogOpen, setIsScanLogOpen] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem("winteq_scanlog_menu_open");
+      if (saved !== null) return saved === "true";
+    }
+    return true;
+  });
+  
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [newLogName, setNewLogName] = useState("");
+  const [deleteModal, setDeleteModal] = useState({ isOpen: false, name: "" });
+  const [editingWorkspace, setEditingWorkspace] = useState<string | null>(null);
+  const [editWorkspaceName, setEditWorkspaceName] = useState("");
+  const [draggedWs, setDraggedWs] = useState<string | null>(null);
+
+  const loadWorkspaces = async () => {
+    const data = await getWorkspaces();
+    setWorkspaces(data);
+  };
 
   useEffect(() => {
-    if (window.innerWidth < 768) setIsSidebarOpen(false);
+    loadWorkspaces();
+    const savedWorkspace = localStorage.getItem("winteq_active_workspace");
+    if (savedWorkspace) setActiveWorkspace(savedWorkspace);
+
+    const handleWorkspaceSync = async () => {
+      const currentWorkspace = localStorage.getItem("winteq_active_workspace") || "Main Log";
+      setActiveWorkspace(currentWorkspace);
+      await loadWorkspaces(); 
+    };
+
+    window.addEventListener("workspaceChanged", handleWorkspaceSync);
+    return () => window.removeEventListener("workspaceChanged", handleWorkspaceSync);
   }, []);
 
+  useEffect(() => {
+    if (isAddModalOpen || deleteModal.isOpen) document.body.classList.add("global-modal-open");
+    else document.body.classList.remove("global-modal-open");
+    return () => document.body.classList.remove("global-modal-open");
+  }, [isAddModalOpen, deleteModal.isOpen]);
+
+  const handleSelectWorkspace = (ws: string) => {
+    if (editingWorkspace) return;
+    setActiveWorkspace(ws);
+    localStorage.setItem("winteq_active_workspace", ws);
+    window.dispatchEvent(new Event("workspaceChanged"));
+    if (pathname !== '/scan-log') router.push('/scan-log');
+  };
+
+  const handleAddWorkspace = async () => {
+    const name = newLogName.trim();
+    if (!name || workspaces.includes(name)) return;
+    await addWorkspace(name);
+    setNewLogName(""); setIsAddModalOpen(false);
+    handleSelectWorkspace(name);
+  };
+
+  const handleDeleteWorkspace = async () => {
+    const name = deleteModal.name;
+    await deleteWorkspace(name);
+    if (activeWorkspace === name) handleSelectWorkspace("Main Log");
+    else loadWorkspaces(); 
+    setDeleteModal({ isOpen: false, name: "" });
+  };
+
+  const handleEditStart = (ws: string, e: React.MouseEvent) => { e.stopPropagation(); setEditingWorkspace(ws); setEditWorkspaceName(ws); };
+  const handleEditSubmit = async (oldName: string) => {
+    const newName = editWorkspaceName.trim();
+    if (!newName || newName === oldName || workspaces.includes(newName)) { setEditingWorkspace(null); return; }
+    setEditingWorkspace(null); 
+    await renameWorkspace(oldName, newName);
+    if (activeWorkspace === oldName) handleSelectWorkspace(newName);
+    else loadWorkspaces(); 
+  };
+
+  const handleDragStart = (e: React.DragEvent, ws: string) => {
+    if (ws === "Main Log") { e.preventDefault(); return; }
+    setDraggedWs(ws); e.dataTransfer.effectAllowed = 'move';
+    (e.target as HTMLElement).style.opacity = '0.5';
+  };
+  const handleDragEnd = (e: React.DragEvent) => { (e.target as HTMLElement).style.opacity = '1'; setDraggedWs(null); };
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); };
+  
+  const handleDrop = async (e: React.DragEvent, targetWs: string) => {
+    e.preventDefault(); if (!draggedWs || draggedWs === targetWs) return;
+    const currentList = [...workspaces]; const fromIdx = currentList.indexOf(draggedWs); let toIdx = currentList.indexOf(targetWs);
+    if (toIdx === 0) toIdx = 1;
+    if (fromIdx > -1 && toIdx > -1) {
+      const [movedItem] = currentList.splice(fromIdx, 1); currentList.splice(toIdx, 0, movedItem);
+      setWorkspaces(currentList); await updateWorkspaceOrder(currentList);
+    }
+    setDraggedWs(null);
+  };
+
+  const toggleScanLogMenu = () => {
+    const newState = !isScanLogOpen;
+    setIsScanLogOpen(newState);
+    localStorage.setItem("winteq_scanlog_menu_open", String(newState));
+  };
+
   return (
-    <div className="flex h-screen bg-gray-50 font-sans text-gray-800 overflow-hidden">
-      
-      <aside className={`transition-all duration-300 ease-in-out bg-slate-900 text-white shrink-0 flex flex-col z-20 ${isSidebarOpen ? "w-64" : "w-20"}`}>
-        <div className="h-16 flex items-center justify-start px-5 border-b border-slate-700">
-          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 -ml-1 rounded-md hover:bg-slate-800 text-slate-300 focus:outline-none transition-colors flex-shrink-0">
-            {isSidebarOpen ? <XMarkIcon className="w-6 h-6" /> : <Bars3Icon className="w-6 h-6" />}
-          </button>
-          <div className={`overflow-hidden whitespace-nowrap transition-all duration-300 ${isSidebarOpen ? "ml-4 w-auto opacity-100" : "w-0 opacity-0"}`}>
-            <h1 className="text-xl font-bold tracking-wider text-blue-400">WINTEQ</h1>
+    <div className="flex h-screen bg-slate-50 font-sans">
+      <div className="w-64 bg-[#0B1120] text-slate-300 flex flex-col shadow-xl z-20 shrink-0">
+        <div className="h-16 flex items-center px-6 font-black text-xl text-white tracking-widest border-b border-slate-800 shrink-0">
+          <div className="flex items-center gap-2"><XMarkIcon className="w-5 h-5 text-blue-500" /> WINTEQ</div>
+        </div>
+        
+        <div className="flex-1 overflow-y-auto py-6 flex flex-col gap-2 px-3 thin-scrollbar">
+          <Link href="/">
+            <div className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors font-medium ${pathname === '/' ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-slate-800 hover:text-white'}`}>
+              <QrCodeIcon className="w-5 h-5" /> Dashboard Scan
+            </div>
+          </Link>
+
+          <div className="flex flex-col">
+            <div onClick={toggleScanLogMenu} className={`flex items-center justify-between px-3 py-2.5 rounded-lg transition-colors font-medium cursor-pointer ${pathname === '/scan-log' ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-slate-800 hover:text-white'}`}>
+              <div onClick={(e) => { e.stopPropagation(); router.push('/scan-log'); }} className="flex items-center gap-3 flex-1"><TableCellsIcon className="w-5 h-5" /> Scan Log</div>
+              <ChevronDownIcon className={`w-4 h-4 transition-transform ${isScanLogOpen ? 'rotate-180' : ''}`} />
+            </div>
+            {isScanLogOpen && (
+              <div className="ml-4 mt-1 flex flex-col gap-1 border-l border-slate-700 pl-2 pr-1 animate-in fade-in slide-in-from-top-2 duration-200">
+                {workspaces.map((ws) => {
+                  const isMainLog = ws === "Main Log"; const isActive = activeWorkspace === ws && pathname === '/scan-log'; const isEditing = editingWorkspace === ws;
+                  return (
+                    <div key={ws} draggable={!isMainLog && !isEditing} onDragStart={(e) => handleDragStart(e, ws)} onDragEnd={handleDragEnd} onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, ws)} className={`flex items-center justify-between px-2 py-2 rounded-md text-sm transition-colors group ${isActive ? 'bg-slate-800/70 text-blue-400 font-bold' : 'text-slate-400 hover:bg-slate-800/30'} ${!isMainLog && !isEditing ? 'cursor-grab active:cursor-grabbing' : ''}`}>
+                      <div onClick={() => !isEditing && handleSelectWorkspace(ws)} className={`flex items-center gap-2 flex-1 truncate mr-2 ${!isEditing ? 'cursor-pointer' : ''}`}>
+                        <FolderIcon className={`w-4 h-4 shrink-0 ${isActive ? 'text-blue-500' : 'text-slate-500'}`} /> 
+                        {isEditing ? (<input type="text" autoFocus value={editWorkspaceName} onChange={(e) => setEditWorkspaceName(e.target.value)} onBlur={() => handleEditSubmit(ws)} onKeyDown={(e) => { if (e.key === 'Enter') handleEditSubmit(ws); if (e.key === 'Escape') setEditingWorkspace(null); }} onClick={(e) => e.stopPropagation()} className="flex-1 bg-slate-900 border border-blue-500 text-blue-100 px-1.5 py-0.5 rounded outline-none focus:ring-2 focus:ring-blue-400 text-sm font-bold min-w-0" />) : (<span className="truncate select-none">{ws}</span>)}
+                      </div>
+                      {!isMainLog && !isEditing && (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button onClick={(e) => handleEditStart(ws, e)} className="p-1.5 text-slate-500 hover:text-blue-400 hover:bg-slate-700 rounded transition-colors" title="Ganti Nama"><PencilIcon className="w-3.5 h-3.5" /></button>
+                          <button onClick={(e) => { e.stopPropagation(); setDeleteModal({ isOpen: true, name: ws }); }} className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-slate-700 rounded transition-colors" title="Hapus Log"><TrashIcon className="w-3.5 h-3.5" /></button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                <div onClick={() => setIsAddModalOpen(true)} className="flex items-center gap-2 px-3 py-2 rounded-md text-sm cursor-pointer transition-colors text-emerald-400 hover:text-emerald-300 hover:bg-slate-800/30 mt-1 font-medium"><PlusIcon className="w-4 h-4" /> Add New Log...</div>
+              </div>
+            )}
+          </div>
+
+          <Link href="/history-activity"><div className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors font-medium ${pathname === '/history-activity' ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-slate-800 hover:text-white'}`}><ClockIcon className="w-5 h-5" /> History Activity</div></Link>
+          <Link href="/pengaturan"><div className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors font-medium ${pathname === '/pengaturan' ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-slate-800 hover:text-white'}`}><Cog6ToothIcon className="w-5 h-5" /> Pengaturan</div></Link>
+        </div>
+        
+        <div className="p-4 border-t border-slate-800 shrink-0"><div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center font-bold text-slate-400 border border-slate-700">A</div></div>
+      </div>
+
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-slate-50 relative">{children}</div>
+
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm animate-in fade-in zoom-in-95 duration-200">
+            <h3 className="text-xl font-black text-slate-800 mb-2">Buat Log Baru</h3>
+            <p className="text-sm text-slate-500 mb-5 font-medium">Buat buku catatan baru untuk memisahkan data scan.</p>
+            <input type="text" autoFocus value={newLogName} onChange={(e) => setNewLogName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddWorkspace()} placeholder="Contoh: Log Proyek X..." className="w-full p-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 mb-6 text-slate-800 font-medium transition-all" />
+            <div className="flex justify-end gap-3"><button onClick={() => setIsAddModalOpen(false)} className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-xl transition-colors">Batal</button><button onClick={handleAddWorkspace} disabled={!newLogName.trim()} className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl shadow-sm transition-colors disabled:opacity-50 flex items-center gap-2"><PlusIcon className="w-4 h-4"/> Buat Log</button></div>
           </div>
         </div>
+      )}
 
-        <nav className="flex-1 py-6 space-y-2 overflow-hidden">
-          
-          {/* MENU 1: DASHBOARD SCAN */}
-          <Link href="/" className={`flex items-center px-4 py-3 mx-3 rounded-lg font-medium transition-colors group ${pathname === '/' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
-            <ClipboardDocumentCheckIcon className={`w-6 h-6 flex-shrink-0 ml-1 ${pathname === '/' ? 'text-white' : 'text-slate-400 group-hover:text-white'}`} />
-            <span className={`ml-4 whitespace-nowrap transition-all duration-300 ${isSidebarOpen ? "opacity-100" : "opacity-0 hidden"}`}>
-              Dashboard Scan
-            </span>
-          </Link>
-          
-          {/* MENU 2: SCAN LOG */}
-          <Link href="/scan-log" className={`flex items-center px-4 py-3 mx-3 rounded-lg font-medium transition-colors group ${pathname === '/scan-log' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
-            <TableCellsIcon className={`w-6 h-6 flex-shrink-0 ml-1 ${pathname === '/scan-log' ? 'text-white' : 'text-slate-400 group-hover:text-white'}`} />
-            <span className={`ml-4 whitespace-nowrap transition-all duration-300 ${isSidebarOpen ? "opacity-100" : "opacity-0 hidden"}`}>
-              Scan Log
-            </span>
-          </Link>
-
-          {/* MENU 3: HISTORY ACTIVITY */}
-          <Link href="/history-activity" className={`flex items-center px-4 py-3 mx-3 rounded-lg font-medium transition-colors group ${pathname === '/history-activity' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
-            <ClockIcon className={`w-6 h-6 flex-shrink-0 ml-1 ${pathname === '/history-activity' ? 'text-white' : 'text-slate-400 group-hover:text-white'}`} />
-            <span className={`ml-4 whitespace-nowrap transition-all duration-300 ${isSidebarOpen ? "opacity-100" : "opacity-0 hidden"}`}>
-              History Activity
-            </span>
-          </Link>
-
-          {/* MENU 4: PENGATURAN */}
-          <Link href="/pengaturan" className={`flex items-center px-4 py-3 mx-3 rounded-lg font-medium transition-colors group ${pathname === '/pengaturan' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
-            <Cog6ToothIcon className={`w-6 h-6 flex-shrink-0 ml-1 ${pathname === '/pengaturan' ? 'text-white' : 'text-slate-400 group-hover:text-white'}`} />
-            <span className={`ml-4 whitespace-nowrap transition-all duration-300 ${isSidebarOpen ? "opacity-100" : "opacity-0 hidden"}`}>
-              Pengaturan
-            </span>
-          </Link>
-
-        </nav>
-      </aside>
-
-      <main className="flex-1 flex flex-col h-screen overflow-hidden min-w-0 transition-all duration-300">
-        <header className="bg-white shadow-sm border-b px-8 py-4 flex justify-between items-center z-10 h-16">
-          
-          {/* JUDUL HEADER DINAMIS: Berubah otomatis sesuai halaman */}
-          <h2 className="text-xl font-semibold text-gray-800">
-            {pathname === '/scan-log' ? 'Master Data: Scan Log' : 
-             pathname === '/history-activity' ? 'Riwayat Aktivitas Sistem' : 
-             pathname === '/pengaturan' ? 'Pengaturan Sistem' : 
-             'Dashboard Utama'}
-          </h2>
-
-          <div className="flex items-center space-x-4">
-            <span className="text-sm font-medium text-gray-500 hidden md:block">
-              {new Date().toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-            </span>
-            <div className="h-8 w-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-700 font-bold border border-blue-200 shadow-sm cursor-pointer hover:bg-blue-200 transition-colors">A</div>
+      {deleteModal.isOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm animate-in fade-in zoom-in-95 duration-200 border-t-4 border-red-500">
+            <div className="flex items-center gap-3 mb-4 text-red-600"><TrashIcon className="w-7 h-7" /><h3 className="text-xl font-black text-slate-800">Hapus Log Ini?</h3></div>
+            <p className="text-sm text-slate-600 mb-6 font-medium leading-relaxed">Anda yakin ingin menghapus <span className="font-bold text-red-600">"{deleteModal.name}"</span>? <br/><br/>Semua data barcode dan riwayat di dalam buku catatan ini akan <b className="text-red-600">dihapus permanen</b> dari database.</p>
+            <div className="flex justify-end gap-3"><button onClick={() => setDeleteModal({ isOpen: false, name: "" })} className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-xl transition-colors">Batal (Esc)</button><button onClick={handleDeleteWorkspace} className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl shadow-sm transition-colors flex items-center gap-2"><TrashIcon className="w-4 h-4"/> Ya, Hapus Permanen</button></div>
           </div>
-        </header>
-
-        <div className="flex-1 overflow-auto p-8">
-          {children}
         </div>
-      </main>
+      )}
     </div>
   );
 }
