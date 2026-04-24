@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation"; 
 import { 
   QrCodeIcon, TableCellsIcon, ClockIcon, Cog6ToothIcon, 
-  PlusIcon, FolderIcon, ChevronDownIcon, XMarkIcon, PencilIcon, TrashIcon
+  PlusIcon, FolderIcon, ChevronDownIcon, XMarkIcon, PencilIcon, TrashIcon, ArrowRightOnRectangleIcon
 } from "@heroicons/react/24/outline";
 
 import { getWorkspaces, addWorkspace, renameWorkspace, deleteWorkspace, updateWorkspaceOrder } from "./../actions/db";
@@ -13,10 +13,15 @@ import { getWorkspaces, addWorkspace, renameWorkspace, deleteWorkspace, updateWo
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter(); 
+  
+  // ================= STATE SECURITY =================
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const inactiveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const hiddenTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // ================= STATE WORKSPACE =================
   const [workspaces, setWorkspaces] = useState<string[]>(["Main Log"]);
   const [activeWorkspace, setActiveWorkspace] = useState("Main Log");
-  
-  // LAZY INITIALIZATION: Langsung baca memori sebelum render, biar gak kedip kebuka!
   const [isScanLogOpen, setIsScanLogOpen] = useState(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem("winteq_scanlog_menu_open");
@@ -32,12 +37,75 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [editWorkspaceName, setEditWorkspaceName] = useState("");
   const [draggedWs, setDraggedWs] = useState<string | null>(null);
 
+  // ================= LOGIKA SECURITY SANGAT KETAT =================
+  useEffect(() => {
+    const isAuth = typeof window !== 'undefined' ? sessionStorage.getItem("winteq_auth") : null;
+
+    if (pathname === '/login') {
+      setIsCheckingAuth(false);
+      return;
+    }
+
+    // PROTEKSI: Kalau belum login, usir ke halaman login
+    if (!isAuth) {
+      router.replace('/login');
+      return;
+    } else {
+      setIsCheckingAuth(false);
+    }
+
+    // FUNGSI TENDANG KELUAR
+    const forceLogout = (reason: string) => {
+      sessionStorage.removeItem("winteq_auth");
+      alert(`Sesi diakhiri secara otomatis untuk keamanan data.\nAlasan: ${reason}`);
+      router.replace('/login');
+    };
+
+    // SENSOR 1: KETIAKA DIAM TIDAK ADA AKTIVITAS (1 MENIT = 60.000 ms)
+    const resetInactiveTimer = () => {
+      if (inactiveTimerRef.current) clearTimeout(inactiveTimerRef.current);
+      inactiveTimerRef.current = setTimeout(() => {
+        forceLogout("Tidak terdeteksi aktivitas selama 1 menit.");
+      }, 60000); 
+    };
+
+    // SENSOR 2: KETIKA PINDAH TAB / MINIMIZE APP (2 MENIT = 120.000 ms)
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        hiddenTimerRef.current = setTimeout(() => {
+          forceLogout("Meninggalkan halaman layar lebih dari 2 menit.");
+        }, 120000); 
+      } else {
+        if (hiddenTimerRef.current) clearTimeout(hiddenTimerRef.current);
+        resetInactiveTimer(); // Balik ke halaman, reset timer aktivitas
+      }
+    };
+
+    // DAFTARKAN SEMUA SENSOR
+    const activeEvents = ["mousemove", "keydown", "click", "scroll", "touchstart"];
+    activeEvents.forEach(e => window.addEventListener(e, resetInactiveTimer));
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    // Mulai Timer Pertama Kali
+    resetInactiveTimer();
+
+    return () => {
+      activeEvents.forEach(e => window.removeEventListener(e, resetInactiveTimer));
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (inactiveTimerRef.current) clearTimeout(inactiveTimerRef.current);
+      if (hiddenTimerRef.current) clearTimeout(hiddenTimerRef.current);
+    };
+  }, [pathname, router]);
+
+  // ================= LOGIKA WORKSPACE =================
   const loadWorkspaces = async () => {
     const data = await getWorkspaces();
     setWorkspaces(data);
   };
 
   useEffect(() => {
+    if (pathname === '/login') return; // Jangan load data di halaman login
+    
     loadWorkspaces();
     const savedWorkspace = localStorage.getItem("winteq_active_workspace");
     if (savedWorkspace) setActiveWorkspace(savedWorkspace);
@@ -50,7 +118,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
     window.addEventListener("workspaceChanged", handleWorkspaceSync);
     return () => window.removeEventListener("workspaceChanged", handleWorkspaceSync);
-  }, []);
+  }, [pathname]);
 
   useEffect(() => {
     if (isAddModalOpen || deleteModal.isOpen) document.body.classList.add("global-modal-open");
@@ -117,6 +185,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     localStorage.setItem("winteq_scanlog_menu_open", String(newState));
   };
 
+  const handleManualLogout = () => {
+    sessionStorage.removeItem("winteq_auth");
+    router.replace('/login');
+  };
+
+  // CEGAH KEDIP SEBELUM CEK TOKEN
+  if (isCheckingAuth) return <div className="h-screen w-full bg-[#0B1120]"></div>;
+
+  // KALAU HALAMAN LOGIN, JANGAN TAMPILIN SIDEBAR SAMA SEKALI
+  if (pathname === '/login') {
+    return <>{children}</>;
+  }
+
+  // TAMPILAN DASHBOARD NORMAL JIKA SUDAH LOGIN
   return (
     <div className="flex h-screen bg-slate-50 font-sans">
       <div className="w-64 bg-[#0B1120] text-slate-300 flex flex-col shadow-xl z-20 shrink-0">
@@ -164,13 +246,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <Link href="/pengaturan"><div className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors font-medium ${pathname === '/pengaturan' ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-slate-800 hover:text-white'}`}><Cog6ToothIcon className="w-5 h-5" /> Pengaturan</div></Link>
         </div>
         
-        <div className="p-4 border-t border-slate-800 shrink-0"><div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center font-bold text-slate-400 border border-slate-700">A</div></div>
+        {/* PROFILE ICON & TOMBOL LOGOUT MANUAL */}
+        <div className="p-4 border-t border-slate-800 flex justify-between items-center shrink-0">
+          <div className="flex items-center gap-3">
+             <div className="w-8 h-8 rounded-full bg-blue-600/20 flex items-center justify-center font-bold text-blue-500 border border-blue-500/30 shadow-inner">F</div>
+             <span className="text-sm font-bold text-slate-300">Faisal</span>
+          </div>
+          <button onClick={handleManualLogout} className="p-2 text-slate-500 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-all" title="Keluar">
+             <ArrowRightOnRectangleIcon className="w-5 h-5" />
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-slate-50 relative">{children}</div>
 
+      {/* MODAL AREA */}
       {isAddModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-100 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm animate-in fade-in zoom-in-95 duration-200">
             <h3 className="text-xl font-black text-slate-800 mb-2">Buat Log Baru</h3>
             <p className="text-sm text-slate-500 mb-5 font-medium">Buat buku catatan baru untuk memisahkan data scan.</p>
@@ -181,7 +273,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       )}
 
       {deleteModal.isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-100 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm animate-in fade-in zoom-in-95 duration-200 border-t-4 border-red-500">
             <div className="flex items-center gap-3 mb-4 text-red-600"><TrashIcon className="w-7 h-7" /><h3 className="text-xl font-black text-slate-800">Hapus Log Ini?</h3></div>
             <p className="text-sm text-slate-600 mb-6 font-medium leading-relaxed">Anda yakin ingin menghapus <span className="font-bold text-red-600">"{deleteModal.name}"</span>? <br/><br/>Semua data barcode dan riwayat di dalam buku catatan ini akan <b className="text-red-600">dihapus permanen</b> dari database.</p>
