@@ -1,238 +1,182 @@
-"use server"; 
+"use client"; // Kita ubah jadi client karena pakai LocalStorage
 
-import { prisma } from "../lib/prisma"; 
-import { revalidatePath } from "next/cache";
-
+// Kita matikan revalidatePath dan Prisma karena ini mode darurat
 const triggerRefresh = () => {
-  revalidatePath("/");
-  revalidatePath("/scan-log");
-  revalidatePath("/history-activity");
+  if (typeof window !== 'undefined') {
+    // Memberi sinyal UI kalau ada perubahan (opsional)
+    window.dispatchEvent(new Event("db_mock_updated"));
+  }
 };
 
 // ==========================================
-// 1. FUNGSI UNTUK PENGATURAN (Layout, Copro, Penerima)
+// HELPERS LOCALSTORAGE (PENGGANTI MYSQL)
+// ==========================================
+const getDB = (key: string) => {
+  if (typeof window === 'undefined') return [];
+  return JSON.parse(localStorage.getItem(key) || "[]");
+};
+
+const setDB = (key: string, data: any) => {
+  if (typeof window !== 'undefined') localStorage.setItem(key, JSON.stringify(data));
+};
+
+const getSet = () => {
+  if (typeof window === 'undefined') return {};
+  return JSON.parse(localStorage.getItem("winteq_mock_settings") || "{}");
+};
+
+const setSet = (data: any) => {
+  if (typeof window !== 'undefined') localStorage.setItem("winteq_mock_settings", JSON.stringify(data));
+};
+
+// ==========================================
+// 1. FUNGSI PENGATURAN
 // ==========================================
 export async function getSettings() {
-  const settings = await prisma.systemSetting.findMany();
-  const result: Record<string, any> = {};
-  settings.forEach((s: any) => { result[s.key] = s.value; });
-  return result;
+  return getSet();
 }
 
 export async function saveSetting(key: string, value: any) {
-  await prisma.systemSetting.upsert({
-    where: { key },
-    update: { value },
-    create: { key, value }
-  });
-  triggerRefresh(); 
+  const s = getSet();
+  s[key] = value;
+  setSet(s);
+  triggerRefresh();
 }
 
 // ==========================================
-// 2. FUNGSI UNTUK DATA SCAN UTAMA
+// 2. FUNGSI DATA SCAN UTAMA
 // ==========================================
 export async function getAllScans(workspace: string = "Main Log") {
-  const data = await prisma.scanLog.findMany({
-    where: { workspace: workspace }, 
-    orderBy: { timestamp_diterima: 'desc' }
-  });
-  
-  return data.map((d: any) => ({
-    ...d,
-    timestamp_diterima: Number(d.timestamp_diterima), 
-    custom_data: d.custom_data ? (d.custom_data as Record<string, string>) : {}
-  }));
+  const scans = getDB("winteq_mock_scans");
+  return scans
+    .filter((s: any) => s.workspace === workspace)
+    .sort((a: any, b: any) => b.timestamp_diterima - a.timestamp_diterima);
 }
 
 export async function upsertScanData(item: any) {
-  await prisma.scanLog.upsert({
-    where: { id: item.id },
-    update: {
-      workspace: item.workspace || "Main Log",
-      barcode_id: item.barcode_id,
-      copro: item.copro,
-      nama_penerima: item.nama_penerima,
-      kategori: item.kategori,
-      waktu_diterima: item.waktu_diterima,
-      waktu_dikembalikan: item.waktu_dikembalikan,
-      timestamp_diterima: BigInt(item.timestamp_diterima),
-      custom_data: item.custom_data
-    },
-    create: {
-      id: item.id,
-      workspace: item.workspace || "Main Log",
-      barcode_id: item.barcode_id,
-      copro: item.copro,
-      nama_penerima: item.nama_penerima,
-      kategori: item.kategori,
-      waktu_diterima: item.waktu_diterima,
-      waktu_dikembalikan: item.waktu_dikembalikan,
-      timestamp_diterima: BigInt(item.timestamp_diterima),
-      custom_data: item.custom_data
-    }
-  });
-  triggerRefresh(); 
+  let scans = getDB("winteq_mock_scans");
+  const idx = scans.findIndex((s: any) => s.id === item.id);
+  const cleanItem = { ...item, workspace: item.workspace || "Main Log" };
+  
+  if (idx > -1) scans[idx] = cleanItem;
+  else scans.unshift(cleanItem); // unshift biar di atas
+  
+  setDB("winteq_mock_scans", scans);
+  triggerRefresh();
 }
 
 export async function deleteScanData(id: string) {
-  await prisma.scanLog.delete({ where: { id } }).catch(() => console.log("Data sudah tidak ada"));
-  triggerRefresh(); 
+  let scans = getDB("winteq_mock_scans");
+  scans = scans.filter((s: any) => s.id !== id);
+  setDB("winteq_mock_scans", scans);
+  triggerRefresh();
 }
 
 export async function bulkDeleteScans(ids: string[]) {
-  await prisma.scanLog.deleteMany({
-    where: { id: { in: ids } }
-  });
-  triggerRefresh(); 
+  let scans = getDB("winteq_mock_scans");
+  scans = scans.filter((s: any) => !ids.includes(s.id));
+  setDB("winteq_mock_scans", scans);
+  triggerRefresh();
 }
 
 // ==========================================
-// 3. FUNGSI UNTUK HISTORY ACTIVITY (Time Travel & Global)
+// 3. FUNGSI HISTORY ACTIVITY
 // ==========================================
 export async function getHistoryLogs(workspace: string = "Main Log") {
-  const whereClause = workspace === "ALL" ? {} : { workspace: workspace };
-  
-  const logs = await prisma.activityHistory.findMany({
-    where: whereClause, 
-    orderBy: { timestamp: 'desc' },
-    take: 100 
-  });
-  return logs.map((l: any) => ({
-    ...l,
-    timestamp: Number(l.timestamp)
-  }));
+  let logs = getDB("winteq_mock_history");
+  if (workspace !== "ALL") logs = logs.filter((l: any) => l.workspace === workspace);
+  return logs.sort((a: any, b: any) => b.timestamp - a.timestamp).slice(0, 100);
 }
 
 export async function saveHistoryLog(entry: any) {
-  await prisma.activityHistory.create({
-    data: {
-      id: entry.id,
-      workspace: entry.workspace || "Main Log",
-      timestamp: BigInt(entry.timestamp),
-      action: entry.action,
-      dataSnapshot: entry.dataSnapshot,
-      layoutSnapshot: entry.layoutSnapshot || {}
-    }
-  });
-  triggerRefresh(); 
+  let logs = getDB("winteq_mock_history");
+  logs.unshift({ ...entry, workspace: entry.workspace || "Main Log" });
+  setDB("winteq_mock_history", logs);
+  triggerRefresh();
 }
 
 export async function clearHistoryLogs(workspace: string = "Main Log") {
-  const whereClause = workspace === "ALL" ? {} : { workspace: workspace };
-  await prisma.activityHistory.deleteMany({
-    where: whereClause
-  });
-  triggerRefresh(); 
+  let logs = getDB("winteq_mock_history");
+  if (workspace !== "ALL") logs = logs.filter((l: any) => l.workspace !== workspace);
+  else logs = [];
+  setDB("winteq_mock_history", logs);
+  triggerRefresh();
 }
 
 // ==========================================
-// 4. FUNGSI UNTUK WORKSPACE (BUKU CATATAN)
+// 4. FUNGSI WORKSPACE
 // ==========================================
 export async function getWorkspaces() {
-  const setting = await prisma.systemSetting.findUnique({ where: { key: "workspaces" } });
-  return setting ? (setting.value as string[]) : ["Main Log"];
+  const s = getSet();
+  return s["workspaces"] || ["Main Log"];
 }
 
-export async function addWorkspace(newWorkspace: string) {
+export async function addWorkspace(name: string) {
   const current = await getWorkspaces();
-  if (!current.includes(newWorkspace)) {
-    const updated = [...current, newWorkspace];
-    await prisma.systemSetting.upsert({
-      where: { key: "workspaces" },
-      update: { value: updated },
-      create: { key: "workspaces", value: updated }
-    });
-    triggerRefresh(); 
+  if (!current.includes(name)) {
+    current.push(name);
+    await saveSetting("workspaces", current);
   }
 }
 
 export async function renameWorkspace(oldName: string, newName: string) {
   if (oldName === "Main Log" || !newName.trim()) return;
   const current = await getWorkspaces();
-  if (current.includes(newName)) return; 
+  if (current.includes(newName)) return;
 
-  const updated = current.map(w => w === oldName ? newName : w);
-  await prisma.systemSetting.upsert({
-    where: { key: "workspaces" },
-    update: { value: updated },
-    create: { key: "workspaces", value: updated }
-  });
+  const updated = current.map((w: any) => w === oldName ? newName : w);
+  await saveSetting("workspaces", updated);
 
-  await prisma.scanLog.updateMany({
-    where: { workspace: oldName },
-    data: { workspace: newName }
-  });
+  let scans = getDB("winteq_mock_scans");
+  scans = scans.map((s: any) => s.workspace === oldName ? { ...s, workspace: newName } : s);
+  setDB("winteq_mock_scans", scans);
+
+  let logs = getDB("winteq_mock_history");
+  logs = logs.map((l: any) => l.workspace === oldName ? { ...l, workspace: newName } : l);
+  setDB("winteq_mock_history", logs);
+
+  const s = getSet();
+  if (s[`copro_list_${oldName}`]) { s[`copro_list_${newName}`] = s[`copro_list_${oldName}`]; delete s[`copro_list_${oldName}`]; }
+  if (s[`penerima_list_${oldName}`]) { s[`penerima_list_${newName}`] = s[`penerima_list_${oldName}`]; delete s[`penerima_list_${oldName}`]; }
+  setSet(s);
   
-  await prisma.activityHistory.updateMany({
-    where: { workspace: oldName },
-    data: { workspace: newName }
-  });
-
-  const settingsToMove = await prisma.systemSetting.findMany({
-    where: { key: { in: [`copro_list_${oldName}`, `penerima_list_${oldName}`] } }
-  });
-  
-  for (const s of settingsToMove) {
-    const newKey = s.key.replace(oldName, newName);
-    await prisma.systemSetting.upsert({
-      where: { key: newKey },
-      update: { value: s.value as any },
-      create: { key: newKey, value: s.value as any }
-    });
-    await prisma.systemSetting.delete({ where: { key: s.key } });
-  }
-
-  triggerRefresh(); 
+  triggerRefresh();
 }
 
 export async function deleteWorkspace(name: string) {
   if (name === "Main Log") return;
   
-  const rawDeletedData = await prisma.scanLog.findMany({ where: { workspace: name } });
-  const settings = await prisma.systemSetting.findUnique({ where: { key: "layouts" } });
-  const currentLayouts = settings ? settings.value : {};
+  const deletedScans = await getAllScans(name);
+  const s = getSet();
+  const currentLayouts = s["layouts"] || {};
 
-  const formattedDeletedData = rawDeletedData.map((d: any) => ({
-    ...d,
-    timestamp_diterima: Number(d.timestamp_diterima)
-  })) as any;
+  let scans = getDB("winteq_mock_scans");
+  scans = scans.filter((s: any) => s.workspace !== name);
+  setDB("winteq_mock_scans", scans);
 
-  await prisma.scanLog.deleteMany({ where: { workspace: name } });
-  await prisma.activityHistory.deleteMany({ where: { workspace: name } });
+  let logs = getDB("winteq_mock_history");
+  logs = logs.filter((l: any) => l.workspace !== name);
+  setDB("winteq_mock_history", logs);
 
-  await prisma.systemSetting.deleteMany({
-    where: { key: { in: [`copro_list_${name}`, `penerima_list_${name}`] } }
-  });
+  delete s[`copro_list_${name}`];
+  delete s[`penerima_list_${name}`];
+  setSet(s);
 
-  await prisma.activityHistory.create({
-    data: {
-      id: crypto.randomUUID(),
-      workspace: "SYSTEM", 
-      timestamp: BigInt(Date.now()),
-      action: `Menghapus Log Permanen: ${name}`,
-      dataSnapshot: formattedDeletedData,
-      layoutSnapshot: currentLayouts || {}
-    }
+  await saveHistoryLog({
+    id: crypto.randomUUID(),
+    workspace: "SYSTEM",
+    timestamp: Date.now(),
+    action: `Menghapus Log Permanen: ${name}`,
+    dataSnapshot: deletedScans,
+    layoutSnapshot: currentLayouts
   });
 
   const current = await getWorkspaces();
-  const updated = current.filter(w => w !== name);
-  await prisma.systemSetting.upsert({
-    where: { key: "workspaces" },
-    update: { value: updated },
-    create: { key: "workspaces", value: updated }
-  });
-
-  triggerRefresh(); 
+  const updated = current.filter((w: any) => w !== name);
+  await saveSetting("workspaces", updated);
 }
 
 export async function updateWorkspaceOrder(newOrder: string[]) {
-  const sanitizedOrder = ["Main Log", ...newOrder.filter(w => w !== "Main Log")];
-  
-  await prisma.systemSetting.upsert({
-    where: { key: "workspaces" },
-    update: { value: sanitizedOrder },
-    create: { key: "workspaces", value: sanitizedOrder }
-  });
-  triggerRefresh();
+  const sanitizedOrder = ["Main Log", ...newOrder.filter((w: any) => w !== "Main Log")];
+  await saveSetting("workspaces", sanitizedOrder);
 }
