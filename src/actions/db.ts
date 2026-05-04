@@ -91,6 +91,7 @@ export async function getHistoryLogs(workspace: string = "Main Log") {
 export async function saveHistoryLog(entry: any) {
   let logs = getDB("winteq_mock_history");
   logs.unshift({ ...entry, workspace: entry.workspace || "Main Log" });
+  logs = logs.slice(0, 15); // Batasi hanya 15 log terbaru
   setDB("winteq_mock_history", logs);
   triggerRefresh();
 }
