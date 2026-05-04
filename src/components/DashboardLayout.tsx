@@ -61,40 +61,40 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       router.replace('/login');
     };
 
-    // SENSOR 1: KETIAKA DIAM TIDAK ADA AKTIVITAS (1 MENIT = 60.000 ms)
-    const resetInactiveTimer = () => {
-      if (inactiveTimerRef.current) clearTimeout(inactiveTimerRef.current);
-      inactiveTimerRef.current = setTimeout(() => {
-        forceLogout("Tidak terdeteksi aktivitas selama 1 menit.");
-      }, 60000); 
-    };
+    // // SENSOR 1: KETIAKA DIAM TIDAK ADA AKTIVITAS (1 MENIT = 60.000 ms)
+    // const resetInactiveTimer = () => {
+    //   if (inactiveTimerRef.current) clearTimeout(inactiveTimerRef.current);
+    //   inactiveTimerRef.current = setTimeout(() => {
+    //     forceLogout("Tidak terdeteksi aktivitas selama 1 menit.");
+    //   }, 60000); 
+    // };
 
-    // SENSOR 2: KETIKA PINDAH TAB / MINIMIZE APP (2 MENIT = 120.000 ms)
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        hiddenTimerRef.current = setTimeout(() => {
-          forceLogout("Meninggalkan halaman layar lebih dari 2 menit.");
-        }, 120000); 
-      } else {
-        if (hiddenTimerRef.current) clearTimeout(hiddenTimerRef.current);
-        resetInactiveTimer(); // Balik ke halaman, reset timer aktivitas
-      }
-    };
+    // // SENSOR 2: KETIKA PINDAH TAB / MINIMIZE APP (2 MENIT = 120.000 ms)
+    // const handleVisibilityChange = () => {
+    //   if (document.hidden) {
+    //     hiddenTimerRef.current = setTimeout(() => {
+    //       forceLogout("Meninggalkan halaman layar lebih dari 2 menit.");
+    //     }, 120000); 
+    //   } else {
+    //     if (hiddenTimerRef.current) clearTimeout(hiddenTimerRef.current);
+    //     resetInactiveTimer(); // Balik ke halaman, reset timer aktivitas
+    //   }
+    // };
 
-    // DAFTARKAN SEMUA SENSOR
-    const activeEvents = ["mousemove", "keydown", "click", "scroll", "touchstart"];
-    activeEvents.forEach(e => window.addEventListener(e, resetInactiveTimer));
-    document.addEventListener("visibilitychange", handleVisibilityChange);
+    // // DAFTARKAN SEMUA SENSOR
+    // const activeEvents = ["mousemove", "keydown", "click", "scroll", "touchstart"];
+    // activeEvents.forEach(e => window.addEventListener(e, resetInactiveTimer));
+    // document.addEventListener("visibilitychange", handleVisibilityChange);
 
-    // Mulai Timer Pertama Kali
-    resetInactiveTimer();
+    // // Mulai Timer Pertama Kali
+    // resetInactiveTimer();
 
-    return () => {
-      activeEvents.forEach(e => window.removeEventListener(e, resetInactiveTimer));
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      if (inactiveTimerRef.current) clearTimeout(inactiveTimerRef.current);
-      if (hiddenTimerRef.current) clearTimeout(hiddenTimerRef.current);
-    };
+    // return () => {
+    //   activeEvents.forEach(e => window.removeEventListener(e, resetInactiveTimer));
+    //   document.removeEventListener("visibilitychange", handleVisibilityChange);
+    //   if (inactiveTimerRef.current) clearTimeout(inactiveTimerRef.current);
+    //   if (hiddenTimerRef.current) clearTimeout(hiddenTimerRef.current);
+    // };
   }, [pathname, router]);
 
   // ================= LOGIKA WORKSPACE =================
